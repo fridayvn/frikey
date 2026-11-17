@@ -3,7 +3,7 @@
 
 namespace vikey { namespace prefs {
 
-static const wchar_t* ROOT = L"Software\\VikeyDich";
+static const wchar_t* ROOT = L"Software\\FriKey";
 
 static HKEY open(REGSAM access) {
     HKEY h = nullptr;
@@ -76,7 +76,7 @@ void remove(const wchar_t* key) {
 std::wstring appDataDir() {
     wchar_t path[MAX_PATH] = {0};
     SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, path);
-    std::wstring dir = std::wstring(path) + L"\\VikeyDich";
+    std::wstring dir = std::wstring(path) + L"\\FriKey";
     CreateDirectoryW(dir.c_str(), nullptr);
     return dir;
 }
@@ -85,7 +85,7 @@ static const wchar_t* RUN_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\
 
 bool launchAtLogin() {
     HKEY h; if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_READ, &h) != ERROR_SUCCESS) return false;
-    DWORD size = 0; bool ok = RegQueryValueExW(h, L"VikeyDich", nullptr, nullptr, nullptr, &size) == ERROR_SUCCESS;
+    DWORD size = 0; bool ok = RegQueryValueExW(h, L"FriKey", nullptr, nullptr, nullptr, &size) == ERROR_SUCCESS;
     RegCloseKey(h); return ok;
 }
 
@@ -94,8 +94,8 @@ void setLaunchAtLogin(bool on) {
     if (on) {
         wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
         std::wstring cmd = L"\"" + std::wstring(exe) + L"\"";
-        RegSetValueExW(h, L"VikeyDich", 0, REG_SZ, (const BYTE*)cmd.c_str(), (DWORD)((cmd.size() + 1) * sizeof(wchar_t)));
-    } else RegDeleteValueW(h, L"VikeyDich");
+        RegSetValueExW(h, L"FriKey", 0, REG_SZ, (const BYTE*)cmd.c_str(), (DWORD)((cmd.size() + 1) * sizeof(wchar_t)));
+    } else RegDeleteValueW(h, L"FriKey");
     RegCloseKey(h);
 }
 
@@ -114,7 +114,30 @@ static void telexStyleFromOpenKey() {
     RegCloseKey(h);
 }
 
+/// FriKey was first built as "VikeyDich": its settings move over once, and its launch-at-login entry goes.
+static void fromVikeyDich() {
+    if (has(L"MigratedFromVikeyDich")) return;
+    setInt(L"MigratedFromVikeyDich", 1);
+    HKEY old; if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\VikeyDich", 0, KEY_READ, &old) != ERROR_SUCCESS) return;
+    HKEY h = open(KEY_WRITE);
+    for (DWORD i = 0; h; i++) {
+        wchar_t name[256]; DWORD nameLen = 256, type = 0, size = 0;
+        if (RegEnumValueW(old, i, name, &nameLen, nullptr, &type, nullptr, &size) != ERROR_SUCCESS) break;
+        std::vector<BYTE> data(size ? size : 1); nameLen = 256;
+        if (RegEnumValueW(old, i, name, &nameLen, nullptr, &type, data.data(), &size) == ERROR_SUCCESS && !has(name))
+            RegSetValueExW(h, name, 0, type, data.data(), size);
+    }
+    if (h) RegCloseKey(h);
+    RegCloseKey(old);
+    HKEY run; if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_READ | KEY_WRITE, &run) == ERROR_SUCCESS) {
+        DWORD size = 0; bool was = RegQueryValueExW(run, L"VikeyDich", nullptr, nullptr, nullptr, &size) == ERROR_SUCCESS;
+        RegDeleteValueW(run, L"VikeyDich"); RegCloseKey(run);
+        if (was) setLaunchAtLogin(true);
+    }
+}
+
 void migrateFromOpenKey() {
+    fromVikeyDich();
     telexStyleFromOpenKey();
     if (has(L"MigratedFromOpenKey")) return;
     setInt(L"MigratedFromOpenKey", 1);

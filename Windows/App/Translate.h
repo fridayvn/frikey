@@ -16,6 +16,8 @@ struct Request {
     std::wstring target;    // language code
     int variant = 0;        // 0 = first translation, 1, 2... = another wording of the same text
     unsigned id = 0;        // echoed in the result; the caller drops results it no longer waits for
+    HWND reply = nullptr;   // where WM_TRANSLATED goes (default: the window given to start()). Ids with the top bit set
+                            // are a separate series (the settings window's "Kiểm tra"), so neither drops the other's results.
 };
 struct Result {
     bool ok = false;

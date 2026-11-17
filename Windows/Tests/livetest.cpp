@@ -102,7 +102,7 @@ int wmain(int argc, wchar_t** argv) {
         // start column: vi | en, "+t" = translate mode on for this case (the fork; mock translator: "EN:" + the text)
         int want = col[1].compare(0, 2, "vi") == 0 ? 1 : 0;
         bool translate = col[1].size() > 2 && col[1].substr(2) == "+t";
-        HWND tray = FindWindowW(L"VikeyDichTray", nullptr);
+        HWND tray = FindWindowW(L"FriKeyTray", nullptr);
         if (!tray) { printf("Vikey is not running\n"); return 98; }
         if (GetForegroundWindow() != win) toFront();
         SetWindowTextW(_edit, L""); SetFocus(_edit); SendMessageW(_edit, EM_SETSEL, 0, 0); Sleep(150);

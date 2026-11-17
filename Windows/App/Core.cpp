@@ -929,8 +929,11 @@ static void TrApplyPairLanguage() {
     if (src == L"vi") setLanguageQuiet(1); else if (src != L"auto") setLanguageQuiet(0);
 }
 
+static bool _keysPaused = false;   // a shortcut is being recorded in the settings window: every key goes to it untouched
+void setKeysPaused(bool paused) { _keysPaused = paused; if (paused) resetTyping(); }
+
 static LRESULT CALLBACK keyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode != HC_ACTION) return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+    if (nCode != HC_ACTION || _keysPaused) return CallNextHookEx(_kbHook, nCode, wParam, lParam);
     KBDLLHOOKSTRUCT* k = (KBDLLHOOKSTRUCT*)lParam;
     if (k->dwExtraInfo == VIKEY_EVENT_TAG) return CallNextHookEx(_kbHook, nCode, wParam, lParam);   // our own output
     bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;

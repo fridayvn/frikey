@@ -415,9 +415,9 @@ static void paint() {
     static const wchar_t* HANDS[] = {L"✋", L"✋🏻", L"✋🏼", L"✋🏽", L"✋🏾", L"✋🏿"};
     text(HANDS[_tone], _fTone, tr, _bText);
     _rt->FillRectangle(D2D1::RectF(tr.left - 10, fy + 14, tr.left - 9, HEIGHT - 14), _bSep);
-    float wx = tr.left - 10 - 10; float keyW = textWidth(L"key", _fWordmark), viW = textWidth(L"Vi", _fWordmark);
-    text(L"key", _fWordmark, D2D1::RectF(wx - keyW, fy, wx, HEIGHT), _bBrand); wx -= keyW;
-    text(L"Vi", _fWordmark, D2D1::RectF(wx - viW, fy, wx, HEIGHT), _bText); wx -= viW + 5;
+    float wx = tr.left - 10 - 10; float keyW = textWidth(L"Key", _fWordmark), viW = textWidth(L"Fri", _fWordmark);
+    text(L"Key", _fWordmark, D2D1::RectF(wx - keyW, fy, wx, HEIGHT), _bBrand); wx -= keyW;
+    text(L"Fri", _fWordmark, D2D1::RectF(wx - viW, fy, wx, HEIGHT), _bText); wx -= viW + 5;
     HICON icon = (HICON)LoadImageW(_inst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
     if (icon) {   // the app icon through GDI on the same surface, after D2D is done with this frame
         ICONINFO ii; if (GetIconInfo(icon, &ii)) {
@@ -505,7 +505,7 @@ static void prepare() {
     if (_win) return;
     static bool reg = false;
     if (!reg) { WNDCLASSW wc = {}; wc.lpfnWndProc = proc; wc.hInstance = _inst; wc.lpszClassName = L"VikeyEmoji"; wc.style = CS_DROPSHADOW; wc.hCursor = LoadCursor(nullptr, IDC_ARROW); RegisterClassW(&wc); reg = true; }
-    _win = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"VikeyEmoji", L"Vikey Emoji", WS_POPUP, 0, 0, (int)WIDTH, (int)HEIGHT, nullptr, nullptr, _inst, nullptr);
+    _win = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, L"VikeyEmoji", L"FriKey Emoji", WS_POPUP, 0, 0, (int)WIDTH, (int)HEIGHT, nullptr, nullptr, _inst, nullptr);
     DWORD pref = 2 /* DWMWCP_ROUND */; DwmSetWindowAttribute(_win, 33 /* DWMWA_WINDOW_ROUNDED_PREFERENCE */, &pref, sizeof(pref));
     COLORREF border = RGB(214, 214, 218); DwmSetWindowAttribute(_win, 34 /* DWMWA_BORDER_COLOR */, &border, sizeof(border));
 }

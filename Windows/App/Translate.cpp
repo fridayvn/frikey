@@ -15,9 +15,19 @@ namespace vikey { namespace translate {
 static HWND _owner = nullptr;
 static std::mutex _mutex;
 static std::map<unsigned, Result> _done;
-static const wchar_t* CRED_TARGET = L"VikeyDich/translate-api-key";
+static const wchar_t* CRED_TARGET = L"FriKey/translate-api-key";
 
-void start(HWND owner) { _owner = owner; }
+void start(HWND owner) {
+    _owner = owner;
+    // the key saved by the first build, "VikeyDich", moves to FriKey's name
+    PCREDENTIALW c = nullptr;
+    if (!hasKey() && CredReadW(L"VikeyDich/translate-api-key", CRED_TYPE_GENERIC, 0, &c)) {
+        std::wstring k = text::fromUtf8(std::string((const char*)c->CredentialBlob, c->CredentialBlobSize));
+        SecureZeroMemory(c->CredentialBlob, c->CredentialBlobSize); CredFree(c);
+        if (setKey(k)) CredDeleteW(L"VikeyDich/translate-api-key", CRED_TYPE_GENERIC, 0);
+        if (!k.empty()) SecureZeroMemory(&k[0], k.size() * sizeof(wchar_t));
+    }
+}
 
 // ---- API key (Credential Manager, this user on this machine, not roamed) -------------------------
 bool hasKey() {
@@ -29,7 +39,7 @@ bool setKey(const std::wstring& key) {
     if (key.empty()) { CredDeleteW(CRED_TARGET, CRED_TYPE_GENERIC, 0); return true; }
     std::string blob = text::toUtf8(key);
     CREDENTIALW c = {}; c.Type = CRED_TYPE_GENERIC; c.TargetName = (LPWSTR)CRED_TARGET; c.Persist = CRED_PERSIST_LOCAL_MACHINE;
-    c.CredentialBlob = (LPBYTE)&blob[0]; c.CredentialBlobSize = (DWORD)blob.size(); c.UserName = (LPWSTR)L"VikeyDich";
+    c.CredentialBlob = (LPBYTE)&blob[0]; c.CredentialBlobSize = (DWORD)blob.size(); c.UserName = (LPWSTR)L"FriKey";
     BOOL ok = CredWriteW(&c, 0);
     SecureZeroMemory(&blob[0], blob.size());
     return ok != FALSE;
@@ -54,8 +64,8 @@ bool configured() {
 static bool post(const std::wstring& host, const std::wstring& path, const std::string& key, const std::string& body,
                  DWORD& status, std::string& response, std::wstring& error) {
     bool ok = false;
-    HINTERNET s = WinHttpOpen(L"VikeyDich", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!s) s = WinHttpOpen(L"VikeyDich", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);   // before Windows 8.1
+    HINTERNET s = WinHttpOpen(L"FriKey", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!s) s = WinHttpOpen(L"FriKey", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);   // before Windows 8.1
     if (!s) { error = L"Không mở được WinHTTP"; return false; }
     DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | 0x00002000 /* TLS 1.3 */;
     if (!WinHttpSetOption(s, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols))) {
@@ -125,7 +135,7 @@ static Result run(const Request& q) {
 }
 
 void request(const Request& q) {
-    HWND owner = _owner;
+    HWND owner = q.reply ? q.reply : _owner;
     std::thread([q, owner] {
         Result res = run(q);
         { std::lock_guard<std::mutex> g(_mutex); _done[res.id] = res; }
@@ -137,7 +147,8 @@ bool take(unsigned id, Result& out) {
     std::lock_guard<std::mutex> g(_mutex);
     auto it = _done.find(id); if (it == _done.end()) return false;
     out = it->second; _done.erase(it);
-    for (auto i = _done.begin(); i != _done.end();) if (i->first < id) i = _done.erase(i); else ++i;   // older, abandoned results
+    for (auto i = _done.begin(); i != _done.end();)   // older, abandoned results of the same series
+        if (i->first < id && (i->first & 0x80000000u) == (id & 0x80000000u)) i = _done.erase(i); else ++i;
     return true;
 }
 

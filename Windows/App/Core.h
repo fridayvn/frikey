@@ -46,6 +46,9 @@ void setTranslateObserver(std::function<void(int event, const std::wstring& mess
 void onTranslateMessage(UINT msg, WPARAM wp);
 void translateTick();                    // every few seconds: auto-off, a stuck request
 
+/// While a shortcut is recorded in the settings window: no Telex, no hotkeys, every key reaches the window as pressed.
+void setKeysPaused(bool paused);
+
 // Typing log
 std::wstring typingLogPath();
 void flushTypingLog();
