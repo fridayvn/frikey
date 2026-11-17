@@ -9,7 +9,8 @@ namespace vikey { namespace menu {
 using namespace look;
 
 // metrics in DIPs (Windows 11 MenuFlyout, a little roomier)
-static const float PAD = 5, ROW = 38, SEP = 11, RADIUS = 6, GUTTER = 40, TEXT_PAD = 14, HINT_GAP = 28, CHEVRON = 22, MIN_W = 240;
+static const float PAD = 4, ROW = 26, SEP = 9, RADIUS = 4, GUTTER = 30, TEXT_PAD = 12, HINT_GAP = 24, CHEVRON = 18, MIN_W = 190;
+static const float FONT = 12.5f, HINT_FONT = 11.5f;
 
 struct Level {
     HWND hwnd = nullptr;
@@ -34,8 +35,8 @@ static void layout(Level* l, float minWidth) {
     for (auto& it : *l->items) {
         if (it.separator) continue;
         if (it.checked || it.icon) gutter = true;
-        textW = std::max(textW, measureWidth(it.text, font(14, it.bold ? 600 : 400)));
-        if (!it.hint.empty()) hintW = std::max(hintW, measureWidth(it.hint, font(13)));
+        textW = std::max(textW, measureWidth(it.text, font(FONT, it.bold ? 600 : 400)));
+        if (!it.hint.empty()) hintW = std::max(hintW, measureWidth(it.hint, font(HINT_FONT)));
         if (!it.sub.empty()) chevron = true;
     }
     (void)gutter;
@@ -66,13 +67,13 @@ static void paint(Level* l) {
         bool hot = i == l->hover && it.enabled;
         if (hot || (l->child && l->childOf == i)) fill(l->rt, r, RADIUS, t.subtleHover);
         D2D1_COLOR_F ink = it.enabled ? t.text : t.text3;
-        if (it.icon) text(l->rt, std::wstring(1, it.icon), icons(15), R(r.left, r.top, GUTTER, ROW), ink);
-        else if (it.checked) text(l->rt, std::wstring(1, IC_CHECK), icons(13), R(r.left, r.top, GUTTER, ROW), ink);
+        if (it.icon) text(l->rt, std::wstring(1, it.icon), icons(13), R(r.left, r.top, GUTTER, ROW), ink);
+        else if (it.checked) text(l->rt, std::wstring(1, IC_CHECK), icons(11), R(r.left, r.top, GUTTER, ROW), ink);
         float right = r.right - TEXT_PAD;
-        if (!it.sub.empty()) { text(l->rt, std::wstring(1, IC_CHEVRON_R), icons(11), R(r.right - CHEVRON - 6, r.top, CHEVRON, ROW), it.enabled ? t.text2 : t.text3); right -= CHEVRON - 6; }
+        if (!it.sub.empty()) { text(l->rt, std::wstring(1, IC_CHEVRON_R), icons(9), R(r.right - CHEVRON - 4, r.top, CHEVRON, ROW), it.enabled ? t.text2 : t.text3); right -= CHEVRON - 4; }
         if (!it.hint.empty())
-            text(l->rt, it.hint, font(13), D2D1::RectF(r.left + GUTTER, r.top, right, r.bottom), it.enabled ? t.text2 : t.text3, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        text(l->rt, it.text, font(14, it.bold ? 600 : 400), D2D1::RectF(r.left + GUTTER, r.top, right, r.bottom), ink, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            text(l->rt, it.hint, font(HINT_FONT), D2D1::RectF(r.left + GUTTER, r.top, right, r.bottom), it.enabled ? t.text2 : t.text3, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        text(l->rt, it.text, font(FONT, it.bold ? 600 : 400), D2D1::RectF(r.left + GUTTER, r.top, right, r.bottom), ink, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
     if (l->rt->EndDraw() == D2DERR_RECREATE_TARGET) { l->rt->Release(); l->rt = nullptr; }
 }

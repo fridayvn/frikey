@@ -37,7 +37,7 @@ void stroke(ID2D1RenderTarget* rt, const D2D1_RECT_F& r, float radius, const D2D
 void line(ID2D1RenderTarget* rt, float x1, float y1, float x2, float y2, const D2D1_COLOR_F& c, float width = 1);
 /// Draws text in r; returns the height it took (wrapped to r's width).
 float text(ID2D1RenderTarget* rt, const std::wstring& s, IDWriteTextFormat* f, const D2D1_RECT_F& r, const D2D1_COLOR_F& c,
-           DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT valign = DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+           int align = -1, int valign = -1);   // -1: the format's own alignment (icons() centres)
 float measureHeight(const std::wstring& s, IDWriteTextFormat* f, float width);
 float measureWidth(const std::wstring& s, IDWriteTextFormat* f);
 

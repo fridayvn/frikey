@@ -321,8 +321,9 @@ static void layout() {
         bool visible = top > 0 && top + CTL_H < view;
         float lineH = 20;
         MoveWindow(e.edit, (int)std::lround((r.left + 11) * _s), (int)std::lround((top + (CTL_H - lineH) / 2) * _s),
-                   (int)std::lround((r.right - r.left - 22) * _s), (int)std::lround(lineH * _s), FALSE);
+                   (int)std::lround((r.right - r.left - 22) * _s), (int)std::lround(lineH * _s), TRUE);
         ShowWindow(e.edit, visible ? SW_SHOWNA : SW_HIDE);
+        if (visible) InvalidateRect(e.edit, nullptr, TRUE);
         EnableWindow(e.edit, e.enabled);
     }
 }

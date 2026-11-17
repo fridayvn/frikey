@@ -160,11 +160,12 @@ void line(ID2D1RenderTarget* rt, float x1, float y1, float x2, float y2, const D
     Brush b(rt, c); if (b.b) rt->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), b.b, width);
 }
 float text(ID2D1RenderTarget* rt, const std::wstring& s, IDWriteTextFormat* f, const D2D1_RECT_F& r, const D2D1_COLOR_F& c,
-           DWRITE_TEXT_ALIGNMENT align, DWRITE_PARAGRAPH_ALIGNMENT valign) {
+           int align, int valign) {
     if (!f || s.empty() || !dwrite()) return 0;
     IDWriteTextLayout* l = nullptr;
     if (FAILED(_dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), f, r.right - r.left, r.bottom - r.top, &l)) || !l) return 0;
-    l->SetTextAlignment(align); l->SetParagraphAlignment(valign);
+    if (align >= 0) l->SetTextAlignment((DWRITE_TEXT_ALIGNMENT)align);
+    if (valign >= 0) l->SetParagraphAlignment((DWRITE_PARAGRAPH_ALIGNMENT)valign);
     DWRITE_TEXT_METRICS m = {}; l->GetMetrics(&m);
     Brush b(rt, c);
     if (b.b) rt->DrawTextLayout(D2D1::Point2F(r.left, r.top), l, b.b, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
