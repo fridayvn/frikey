@@ -32,6 +32,7 @@ enum { ID_VIET = 100, ID_ENG, ID_SETTINGS, ID_AUTOSWITCH, ID_ABOUT, ID_QUIT, ID_
        ID_TR_SOURCE = 300, ID_TR_TARGET = 400 };   // + language index (source: 0 = auto, then the list)
 
 static HWND _hwnd; static NOTIFYICONDATAW _nid = {};
+static bool _skipClickUp = false; static ULONGLONG _clickSwitchedAt = 0;   // tray clicks
 static HICON _iconV, _iconE, _iconVt, _iconEt;   // ...t: translate mode on
 
 static bool darkTaskbar() {
@@ -128,8 +129,16 @@ static LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (WM_TASKBARCREATED && msg == WM_TASKBARCREATED) { Shell_NotifyIconW(NIM_ADD, &_nid); return 0; }   // put the icon back (_nid has the current one)
     switch (msg) {
     case WM_TRAY:
-        if (LOWORD(lp) == WM_LBUTTONUP) ui::showSettings(GetModuleHandleW(nullptr), ui::PageTyping);
-        else if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU) showMenu();
+        // one click switches Tiếng Việt / English at once (like Unikey); a double click opens the settings. The first click
+        // of a double click has already switched, so the double click switches back: the language ends where it was
+        if (LOWORD(lp) == WM_LBUTTONUP) {
+            if (_skipClickUp) _skipClickUp = false;
+            else { core::setLanguageByUser(!core::language()); _clickSwitchedAt = GetTickCount64(); }
+        } else if (LOWORD(lp) == WM_LBUTTONDBLCLK) {
+            if (GetTickCount64() - _clickSwitchedAt <= GetDoubleClickTime() + 100) core::setLanguageByUser(!core::language());
+            _skipClickUp = true;   // the double click's own button-up
+            ui::showSettings(GetModuleHandleW(nullptr), ui::PageTyping);
+        } else if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU) showMenu();
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {

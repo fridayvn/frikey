@@ -41,7 +41,7 @@ float text(ID2D1RenderTarget* rt, const std::wstring& s, IDWriteTextFormat* f, c
 float measureHeight(const std::wstring& s, IDWriteTextFormat* f, float width);
 float measureWidth(const std::wstring& s, IDWriteTextFormat* f);
 
-/// The brand mark: a rounded square in FriKey's gradient with an "F".
+/// The brand mark: FriKey's app icon.
 void logo(ID2D1RenderTarget* rt, float x, float y, float size);
 
 // Fluent icon code points

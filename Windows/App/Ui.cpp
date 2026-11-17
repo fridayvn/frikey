@@ -2,11 +2,14 @@
 #include "resource.h"
 #include <dwrite_3.h>
 #include <dwmapi.h>
+#include <wincodec.h>
+#include <cmath>
 #include <map>
 #include <vector>
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 namespace vikey { namespace look {
 
@@ -183,15 +186,25 @@ float measureWidth(const std::wstring& s, IDWriteTextFormat* f) {
     DWRITE_TEXT_METRICS m = {}; l->GetMetrics(&m); l->Release(); return m.widthIncludingTrailingWhitespace;
 }
 
+/// The app icon (FriKey.ico), at the pixel size it is drawn at: the same F as the exe and the taskbar.
 void logo(ID2D1RenderTarget* rt, float x, float y, float size) {
-    D2D1_GRADIENT_STOP stops[2] = {{0, hex(0x7C5CFF)}, {1, hex(0x3B5BDB)}};
-    ID2D1GradientStopCollection* sc = nullptr; ID2D1LinearGradientBrush* g = nullptr;
-    rt->CreateGradientStopCollection(stops, 2, &sc);
-    if (sc) rt->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(x, y), D2D1::Point2F(x + size, y + size)), sc, &g);
-    float rad = size * 0.24f;
-    if (g) { rt->FillRoundedRectangle(D2D1::RoundedRect(R(x, y, size, size), rad, rad), g); g->Release(); }
-    if (sc) sc->Release();
-    text(rt, L"F", font(size * 0.62f, 700, true), R(x, y - size * 0.04f, size, size), hex(0xFFFFFF), DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    static IWICImagingFactory* wic = nullptr; static std::map<int, IWICFormatConverter*> cache;
+    if (!wic) { CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)); }
+    if (!wic) return;
+    float dx, dy; rt->GetDpi(&dx, &dy);
+    int px = (int)std::ceil(size * dx / 96);
+    IWICFormatConverter*& conv = cache[px];
+    if (!conv) {
+        HICON icon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, px, px, LR_DEFAULTCOLOR);
+        IWICBitmap* bmp = nullptr;
+        if (icon && SUCCEEDED(wic->CreateBitmapFromHICON(icon, &bmp)) && SUCCEEDED(wic->CreateFormatConverter(&conv)))
+            conv->Initialize(bmp, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeMedianCut);
+        if (bmp) bmp->Release();
+        if (icon) DestroyIcon(icon);
+        if (!conv) return;
+    }
+    ID2D1Bitmap* b = nullptr;
+    if (SUCCEEDED(rt->CreateBitmapFromWicBitmap(conv, nullptr, &b)) && b) { rt->DrawBitmap(b, R(x, y, size, size), 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR); b->Release(); }
 }
 
 }}

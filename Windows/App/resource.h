@@ -12,7 +12,7 @@
 #define IDR_FONT_SEMIBOLD 212
 #define IDR_FONT_BOLD 213
 #ifndef FRIKEY_VERSION
-#define FRIKEY_VERSION "0.2.2"
+#define FRIKEY_VERSION "0.2.3"
 #endif
 #ifndef VIKEY_VERSION
 #define VIKEY_VERSION "0.1.0"
