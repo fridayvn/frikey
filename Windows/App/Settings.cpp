@@ -399,9 +399,6 @@ static void buildMain() {
     endGroup();
     beginGroup(nullptr);
     toggleRow(L"Mở Vikey khi đăng nhập", L"Tự mở Vikey mỗi khi bạn đăng nhập vào Windows.", C_LOGIN, prefs::launchAtLogin());
-    toggleRow(L"Tự động cập nhật", L"Mỗi ngày Vikey kiểm tra bản mới trên vikey.app, tự tải về và cài khi bạn thoát Vikey hoặc tắt máy.", C_UPDATE, prefs::getInt(L"AutoUpdate", 1) != 0);
-    HWND fb = row(L"Góp ý", L"Báo lỗi hoặc góp ý cho Vikey: mở trang vikey.app/feedback trong trình duyệt.", L"VikeyButton", C_FEEDBACK, 120, 26, WS_TABSTOP);
-    SetWindowTextW(fb, L"Gửi góp ý…"); setBg(fb, GROUP);
     endGroup();
     refreshEnabled();
     RECT wr = {0, 0, W, _y}; AdjustWindowRectEx(&wr, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);

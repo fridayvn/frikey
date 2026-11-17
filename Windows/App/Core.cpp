@@ -280,7 +280,7 @@ void reloadSettings() {
     vUseSmartSwitchKey = prefs::getInt(L"UseSmartSwitchKey", 1);
     vAutoSwitchByTyping = AutoSwitchPaused() ? 0 : prefs::getInt(L"AutoSwitchByTyping", 1);
     vTypingLogKeys = prefs::getInt(L"TypingLogKeys", 1);
-    vTypingLogEnabled = prefs::getInt(L"TypingLogEnabled", 0);
+    vTypingLogEnabled = 0;   // fork: the typing log records keystrokes to disk; never on
     int hotkey = prefs::getInt(L"SwitchKeyStatus", 0);
     vSwitchKeyStatus = hotkey ? hotkey : 0x7A000206;   // default Alt+Z (same bits as ⌥Z on macOS)
     vEmojiHotkey = prefs::getInt(L"EmojiPicker", 0) ? prefs::getInt(L"EmojiHotkey", 0) : 0;
