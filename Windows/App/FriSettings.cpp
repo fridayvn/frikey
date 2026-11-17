@@ -22,7 +22,7 @@
 #include <string>
 
 #ifndef FRIKEY_VERSION
-#define FRIKEY_VERSION "0.2.3"
+#define FRIKEY_VERSION "0.2.4"
 #endif
 #define WIDEN2(x) L##x
 #define WIDEN(x) WIDEN2(x)
@@ -442,7 +442,7 @@ static void paint() {
             logo(_rt, r.left + 24, r.top + 24, 64);
             text(_rt, e.title, font(26, 700), R(r.left + 108, r.top + 22, 400, 34), t.text);
             text(_rt, e.desc, font(14), R(r.left + 108, r.top + 56, 500, 20), t.text2);
-            text(_rt, L"Phiên bản " WIDEN(FRIKEY_VERSION) L" · dựa trên Vikey 1.0.33", font(12), R(r.left + 108, r.top + 78, 500, 18), t.text3);
+            text(_rt, L"Phiên bản " WIDEN(FRIKEY_VERSION) L" · dựa trên Vikey 1.0.33+", font(12), R(r.left + 108, r.top + 78, 500, 18), t.text3);
             break;
         case K_CARD: {
             bool clickable = e.ctl != C_NONE && e.ctl != C_EDIT && e.ctl != C_KEY;
