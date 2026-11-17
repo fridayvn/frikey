@@ -218,6 +218,32 @@ static void runSite(HWND owner) {
     }
 }
 
+int readFocusedField(std::wstring& out) {
+    out.clear();
+    if (ownWindowInFront(GetForegroundWindow())) return 1;
+    IUIAutomation* uia = createUia(); if (!uia) { CoUninitialize(); return 1; }
+    int rc = 1; IUIAutomationElement* el = nullptr;
+    if (SUCCEEDED(uia->GetFocusedElement(&el)) && el) {
+        BOOL pw = FALSE; el->get_CurrentIsPassword(&pw);
+        if (pw) rc = 2;
+        else {
+            // the Value pattern only: a Text pattern can span a whole web page, and all of it would go to the translator
+            IUIAutomationValuePattern* vp = nullptr;
+            if (SUCCEEDED(el->GetCurrentPatternAs(UIA_ValuePatternId, IID_IUIAutomationValuePattern, (void**)&vp)) && vp) {
+                BOOL ro = TRUE; vp->get_CurrentIsReadOnly(&ro);
+                BSTR b = nullptr;
+                if (ro) rc = 2;
+                else if (SUCCEEDED(vp->get_CurrentValue(&b)) && b) { out.assign(b, SysStringLen(b)); SecureZeroMemory(b, SysStringByteLen(b)); SysFreeString(b); rc = 0; }
+                vp->Release();
+            }
+        }
+        el->Release();
+    }
+    uia->Release();
+    CoUninitialize();
+    return rc;
+}
+
 void start(HWND owner) {
     if (_wake) return;
     _wake = CreateEventW(nullptr, FALSE, TRUE, nullptr);   // signaled: the first password check runs right away

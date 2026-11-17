@@ -33,6 +33,19 @@ void resetTyping();
 /// Types text into the focused app (KEYEVENTF_UNICODE; surrogate pairs for astral emoji).
 void insertText(const std::wstring& text);
 
+// Translate mode (off at every launch). The window set here gets WM_TR_* and translate::WM_TRANSLATED: pass them to
+// onTranslateMessage. The observer hears 0 (state changed: on/off, waiting) and 1 (a message for the user, never typed text).
+const UINT WM_TR_TOGGLE = WM_APP + 22;   // the toggle key, posted from the hook
+const UINT WM_TR_FIELD = WM_APP + 23;    // the focused field was read (wParam = request id)
+bool translateEnabled();
+bool translateBusy();
+void setTranslateEnabled(bool on);
+void translatePairChanged();             // after TranslateSource / TranslateTarget changed
+void setTranslateWindow(HWND owner);
+void setTranslateObserver(std::function<void(int event, const std::wstring& message)> f);
+void onTranslateMessage(UINT msg, WPARAM wp);
+void translateTick();                    // every few seconds: auto-off, a stuck request
+
 // Typing log
 std::wstring typingLogPath();
 void flushTypingLog();

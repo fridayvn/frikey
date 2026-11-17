@@ -18,4 +18,7 @@ void start(HWND owner);
 bool focusedIsPassword();
 /// Re-checks the focused control soon (call on focus events, with the event's hwnd, idObject and idChild); does not block.
 void pollPassword(HWND hwnd, LONG idObject, LONG idChild);
+/// Translate mode: the whole text of the focused input field, read through its UI Automation Value pattern. Blocks for
+/// up to ~2 s: call it on a thread of its own. 0 = read, 1 = no readable field, 2 = password or read-only field.
+int readFocusedField(std::wstring& out);
 }}

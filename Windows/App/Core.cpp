@@ -3,6 +3,8 @@
 #include "KeyMap.h"
 #include "Prefs.h"
 #include "Engine.h"
+#include "Translate.h"
+#include <thread>
 #include <psapi.h>
 #include <mmsystem.h>
 #include "resource.h"
@@ -51,6 +53,7 @@ enum : unsigned { F_SHIFT = 1, F_CONTROL = 2, F_ALT = 4, F_WIN = 8, F_CAPS = 16 
 static HHOOK _kbHook = nullptr, _mouseHook = nullptr;
 static HWINEVENTHOOK _focusHook = nullptr, _fgHook = nullptr;
 static vKeyHookState* pData = nullptr;
+static int _trHotkey = 0, _trToggleKey = 0;   // translate mode keys (reloadSettings)
 static unsigned _flag = 0, _lastFlag = 0;
 static bool _modifierChordUsed = false;   // the modifiers held went with a click or another key: no modifier-only hotkey until all are released
 static DWORD _hotkeyVk = 0;               // the hotkey's key while it is down (with or without its modifiers): the LL hook has no repeat flag, so key-downs before its key-up are auto-repeat
@@ -199,6 +202,10 @@ static void TLManual(const char* via, int to) {
 static void TLUndo() { TLEndWord("undo"); _tlSinceAuto = false; TLCount("undo"); TLWrite(std::string("\"e\":\"undo\",\"via\":\"backspace\",\"to\":\"") + TLLang(_autoFixUndo.language) + "\""); }
 static void TLContext(int to) { TLEndWord("context"); TLCount("context"); TLWrite(std::string("\"e\":\"context\",\"to\":\"") + TLLang(to) + "\""); }
 
+// Translate mode (bottom of this file): what the earlier code tells it.
+static void TrForget();              // the cursor moved away from the tracked text: start over
+static void TrRecordBatch();         // the keys Vikey is about to send
+
 // ---- Front app / smart switch -----------------------------------------------------------
 std::wstring frontAppName() { return _frontApp; }
 
@@ -237,12 +244,14 @@ void onForegroundChanged() {
     _siteHost.clear();
     ResetEnglishWord(true); _autoFixUndo.active = false;
     TLEndWord("app"); _tlApp = _frontApp;
+    TrForget();
     if (vUseSmartSwitchKey) ApplySmartSwitch();
     startNewSession();
 }
 void onSiteChanged(const std::wstring& host) {
     if (host == _siteHost) return;
     _siteHost = host;
+    TrForget();
     ResetEnglishWord(true); _autoFixUndo.active = false;
     if (vUseSmartSwitchKey) ApplySmartSwitch();
     startNewSession();
@@ -284,6 +293,8 @@ void reloadSettings() {
     int hotkey = prefs::getInt(L"SwitchKeyStatus", 0);
     vSwitchKeyStatus = hotkey ? hotkey : 0x7A000206;   // default Alt+Z (same bits as ⌥Z on macOS)
     vEmojiHotkey = prefs::getInt(L"EmojiPicker", 0) ? prefs::getInt(L"EmojiHotkey", 0) : 0;
+    _trHotkey = prefs::getInt(L"TranslateHotkey", KEY_T | 0x200);                 // Alt+T
+    _trToggleKey = prefs::getInt(L"TranslateToggleHotkey", KEY_T | 0x200 | 0x800); // Alt+Shift+T
     updateOtherInputLanguage();
     if (_observer) _observer(vLanguage);
 }
@@ -304,7 +315,7 @@ static void batchKey(WORD vk, DWORD extra = 0) {
     INPUT c, d;
     inputKey(c, vk, true, extra); inputKey(d, vk, false, extra); _batch.push_back(c); _batch.push_back(d);
 }
-static void flushBatch() { if (!_batch.empty()) { SendInput((UINT)_batch.size(), _batch.data(), sizeof(INPUT)); _batch.clear(); } }
+static void flushBatch() { if (!_batch.empty()) { TrRecordBatch(); SendInput((UINT)_batch.size(), _batch.data(), sizeof(INPUT)); _batch.clear(); } }
 
 static bool IsLetterKey(Uint16 key);
 /// Types the engine's new characters; for a restore, also the key that triggered it.
@@ -524,10 +535,12 @@ static bool modifierVk(DWORD vk, bool down) {
     return true;
 }
 
-static LRESULT CALLBACK keyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode != HC_ACTION) return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+/// The original Vikey hook. The keyboardHook() below wraps it for translate mode.
+static bool _passed = false;   // the inner hook let the key through to the app unchanged
+static LRESULT keyboardHookInner(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode != HC_ACTION) return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));
     KBDLLHOOKSTRUCT* k = (KBDLLHOOKSTRUCT*)lParam;
-    if (k->dwExtraInfo == VIKEY_EVENT_TAG) return CallNextHookEx(_kbHook, nCode, wParam, lParam);   // our own output
+    if (k->dwExtraInfo == VIKEY_EVENT_TAG) return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));   // our own output
     bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
     // modifiers as Windows has them, not only from the events seen here: keys let go on the lock screen (Win+L) or
     // after Ctrl+Alt+Del never reach the hook, and a Win or Alt left set stops Telex until that key is tapped again
@@ -548,9 +561,9 @@ static LRESULT CALLBACK keyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
             _lastFlag = 0; _hasJustUsedHotKey = hit;
             if (hit) switchLanguage("hotkey");
         }
-        return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+        return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));
     }
-    if (!down) { if (k->vkCode == _hotkeyVk) _hotkeyVk = 0; return CallNextHookEx(_kbHook, nCode, wParam, lParam); }
+    if (!down) { if (k->vkCode == _hotkeyVk) _hotkeyVk = 0; return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam)); }
 
     _keycode = engineKey(k->vkCode);
     _keyVk = k->vkCode; _keyExtended = (k->flags & LLKHF_EXTENDED) ? KEYEVENTF_EXTENDEDKEY : 0;
@@ -572,13 +585,13 @@ static LRESULT CALLBACK keyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
     if (_keycode == KEY_EMPTY) {   // F-keys, media keys...: not ours. A key typing a character still ends the word.
         cancelModifierHotkey();   // Ctrl+Shift+F5, Ctrl+Shift+numpad +: releasing Ctrl+Shift afterwards isn't the hotkey
         if (unmodeledKeyEndsWord(k->vkCode)) { TLEndWord("other"); resetTyping(); }
-        return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+        return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));
     }
 
     // a password field gets the keys exactly as typed, in both languages: no switch hotkey (Shift+Z types Z, as under the
     // Mac's secure input and Linux's password purpose), no Telex, no auto switch, no Backspace undo (also right after a
     // focus change, until the field has been checked)
-    if (site::focusedIsPassword()) { cancelModifierHotkey(); _hotkeyVk = 0; resetTyping(); return CallNextHookEx(_kbHook, nCode, wParam, lParam); }
+    if (site::focusedIsPassword()) { cancelModifierHotkey(); _hotkeyVk = 0; resetTyping(); return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam)); }
 
     // switch language hotkey
     if (GET_SWITCH_KEY(vSwitchKeyStatus) != _keycode) { cancelModifierHotkey(); _hotkeyVk = 0; }
@@ -604,14 +617,14 @@ static LRESULT CALLBACK keyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
     updateOtherInputLanguage();   // every key: Win+Space can switch to a Japanese/Chinese IME in the same window
     if (vLanguage == 0) {
         if (vAutoSwitchByTyping && HandleEnglishKeyForAutoSwitch()) return 1;
-        return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+        return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));
     }
-    if (vOtherLanguage && _otherInputLanguage) return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+    if (vOtherLanguage && _otherInputLanguage) return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));
 
     vAutoSwitchRequest = -1;
     vKeyHandleEvent(vKeyEvent::Keyboard, vKeyEventState::KeyDown, _keycode,
                     (_flag & F_SHIFT) ? 1 : ((_flag & F_CAPS) ? 2 : 0), OTHER_CONTROL_KEY);
-    if (pData->code == vDoNothing) return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+    if (pData->code == vDoNothing) return (_passed = true, CallNextHookEx(_kbHook, nCode, wParam, lParam));
     if (pData->code == vWillProcess || pData->code == vRestore || pData->code == vRestoreAndStartNewSession) {
         bool autoSwitchAtBreak = vAutoSwitchRequest == 0 && !IsLetterKey(_keycode);
         int correctedCount = pData->newCharCount;
@@ -630,6 +643,7 @@ static LRESULT CALLBACK mouseHook(int nCode, WPARAM wParam, LPARAM lParam) {
         cancelModifierHotkey();   // Ctrl+Shift-click: the modifiers were for the click, so releasing them isn't the Ctrl+Shift hotkey
         _hotkeyVk = 0;   // a missed key-up (focus change, lock screen) must not swallow the next Alt+Z
         _autoFixUndo.active = false; TLNoteClick();
+        TrForget();
         if (vLanguage == 0) ResetEnglishWord(true);
         else vKeyHandleEvent(vKeyEvent::Mouse, vKeyEventState::MouseDown, 0);
     }
@@ -637,6 +651,347 @@ static LRESULT CALLBACK mouseHook(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 static VOID CALLBACK foregroundHook(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) { _hotkeyVk = 0; updateOtherInputLanguage(); onForegroundChanged(); }
+
+// ---- Translate mode ----------------------------------------------------------------------------
+// Off at every launch, and nothing of it runs while off. On: the text typed since the cursor last jumped is kept in
+// tr::buf (RAM only, wiped on every reset). The translate key sends it to translate::request() and types the answer
+// over it; Backspace right after puts the original back; the key again asks for another wording. Keys typed while a
+// translation is on its way are swallowed. Nothing is ever sent without the translate key.
+namespace tr {
+enum State { Idle, Reading, Pending, Replaced };
+static bool enabled = false;
+static State state = Idle;
+static std::wstring buf;                 // the tracked text, as it is on screen, ending at the cursor
+static bool incomplete = false;          // something was typed or pasted that buf couldn't follow: use the whole field
+static bool suppress = false;            // our own replacement is being sent: not recorded key by key
+static HWND owner = nullptr;
+static unsigned reqId = 0;
+static HWND reqWindow = nullptr, reqFocus = nullptr;
+static std::wstring source, shown, onScreen;   // the text translated, the translation typed, the text a result replaces
+static bool wholeField = false;          // source is the whole field (replaced with Ctrl+A) rather than buf
+static int variant = 0;
+static ULONGLONG lastUse = 0, pendingSince = 0;
+static DWORD hotkeyVk = 0;               // the translate or toggle key while it is held (the LL hook has no repeat flag)
+static std::function<void(int, const std::wstring&)> observer;
+static std::mutex fieldMutex; static std::wstring field; static int fieldRc = 1; static unsigned fieldId = 0;
+}
+
+static void TrWipe(std::wstring& w) { if (!w.empty()) SecureZeroMemory(&w[0], w.size() * sizeof(wchar_t)); w.clear(); }
+/// The cursor moved (arrow keys, Enter sent the message...): tracking starts over from here, complete again.
+static void TrJump() { TrWipe(tr::buf); tr::incomplete = false; }
+/// Text changed in a way buf can't follow (paste, an IME, an emoji sequence...): the translate key reads the whole field.
+static void TrLost() { TrWipe(tr::buf); tr::incomplete = true; }
+static void TrNotify(int event, const std::wstring& message) { if (tr::observer) tr::observer(event, message); }
+
+/// Apps whose keys never go into the buffer, translate mode on or off: password managers and terminals.
+static bool TrSensitiveApp() {
+    static const wchar_t* excluded[] = {
+        L"1password.exe", L"bitwarden.exe", L"keepassxc.exe", L"keepass.exe", L"lastpass.exe", L"dashlane.exe", L"enpass.exe", L"nordpass.exe",
+        L"windowsterminal.exe", L"cmd.exe", L"powershell.exe", L"pwsh.exe", L"putty.exe", L"wezterm-gui.exe", L"alacritty.exe", L"conhost.exe", L"openconsole.exe", L"termius.exe",
+        L"mstsc.exe", L"credentialuibroker.exe", L"consent.exe" };
+    std::wstring app = _frontApp; std::transform(app.begin(), app.end(), app.begin(), ::towlower);
+    for (auto e : excluded) if (app == e) return true;
+    return false;
+}
+static bool TrRecording() {
+    return tr::enabled && !tr::suppress && (tr::state == tr::Idle || tr::state == tr::Replaced) && !TrSensitiveApp() && !site::focusedIsPassword();
+}
+
+/// The text being tracked is no longer next to the cursor (click, arrow keys, another app...): start over from here.
+/// A translation on its way is dropped: the place it was meant for may be gone.
+static void TrForget() {
+    TrJump();
+    if (tr::state == tr::Pending || tr::state == tr::Reading) { tr::reqId++; TrNotify(1, L"Đã huỷ bản dịch đang chờ"); }
+    if (tr::state != tr::Idle) { tr::state = tr::Idle; TrWipe(tr::source); TrWipe(tr::shown); TrWipe(tr::onScreen); TrNotify(0, L""); }
+}
+
+/// One UTF-16 unit typed. Emoji sequences (ZWJ, skin tones, flags, variation selectors) and combining marks delete in
+/// ways a count of characters can't follow, so the tracking stops there; the translate key then reads the whole field.
+static void TrPushUnit(wchar_t u) {
+    if (tr::buf.size() >= 4000) { TrLost(); return; }
+    if (u == 0x200D || u == 0xFE0E || u == 0xFE0F || u == 0x20E3 || (u >= 0x0300 && u <= 0x036F)) { TrLost(); return; }
+    tr::buf += u;
+    size_t n = tr::buf.size();
+    if (n >= 2 && IS_LOW_SURROGATE(u) && IS_HIGH_SURROGATE(tr::buf[n - 2])) {
+        unsigned cp = 0x10000 + (((unsigned)tr::buf[n - 2] - 0xD800) << 10) + ((unsigned)u - 0xDC00);
+        if ((cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0x1F1E6 && cp <= 0x1F1FF) || (cp >= 0xE0020 && cp <= 0xE007F)) TrLost();
+    }
+}
+static void TrPop() {
+    size_t n = tr::buf.size();
+    if (n == 0) return;   // deleting text from before the tracked part: what is tracked is still right before the cursor
+    if (n >= 2 && IS_LOW_SURROGATE(tr::buf[n - 1]) && IS_HIGH_SURROGATE(tr::buf[n - 2])) tr::buf.resize(n - 2);
+    else tr::buf.resize(n - 1);
+}
+
+/// Called by flushBatch(): the characters and Backspaces Vikey is about to send are what ends up on screen.
+static void TrRecordBatch() {
+    if (!tr::enabled || tr::suppress) return;
+    if (!TrRecording()) { TrLost(); return; }
+    for (const INPUT& in : _batch) {
+        if (in.type != INPUT_KEYBOARD || (in.ki.dwFlags & KEYEVENTF_KEYUP)) continue;
+        if (in.ki.dwFlags & KEYEVENTF_UNICODE) TrPushUnit((wchar_t)in.ki.wScan);
+        else if (in.ki.wVk == VK_BACK) TrPop();
+        else if (in.ki.wVk == VK_RETURN) { if (GetAsyncKeyState(VK_SHIFT) < 0) TrPushUnit(L'\n'); else TrJump(); }   // the key after a restore
+        else if (in.ki.wVk == VK_TAB) TrJump();
+        else { TrLost(); return; }   // Home, a numpad key...: the cursor may have moved
+    }
+}
+
+/// A key the inner hook let through to the app unchanged.
+static void TrNotePassedKey(DWORD vk) {
+    if (!tr::enabled || tr::suppress) return;
+    if (!TrRecording()) { TrLost(); return; }   // a password field being checked, a terminal...: not followed
+    if (_flag & (F_CONTROL | F_ALT | F_WIN)) { TrLost(); return; }   // paste, undo, select all, word delete...
+    switch (vk) {
+    case VK_BACK: TrPop(); return;
+    case VK_RETURN: if (_flag & F_SHIFT) TrPushUnit(L'\n'); else TrJump(); return;   // Enter sent the message: the field is empty
+    case VK_TAB: case VK_ESCAPE: case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN: case VK_HOME: case VK_END:
+    case VK_PRIOR: case VK_NEXT: TrJump(); return;
+    case VK_DELETE: case VK_INSERT: case VK_PACKET: TrLost(); return;
+    }
+    if (vOtherLanguage && _otherInputLanguage) { TrLost(); return; }   // a Japanese/Chinese IME composes on its own
+    if (_keycode == KEY_EMPTY) { if (unmodeledKeyEndsWord(vk)) TrLost(); return; }
+    Uint16 ch = keyCodeToCharacter(_keycode | ((_flag & F_SHIFT) || ((_flag & F_CAPS) && IsLetterKey(_keycode)) ? CAPS_MASK : 0));
+    if (ch) TrPushUnit((wchar_t)ch); else TrLost();
+}
+
+static unsigned TrFlags() {
+    return (GetKeyState(VK_CAPITAL) & 1 ? F_CAPS : 0) | (GetAsyncKeyState(VK_SHIFT) < 0 ? F_SHIFT : 0) | (GetAsyncKeyState(VK_CONTROL) < 0 ? F_CONTROL : 0) |
+           (GetAsyncKeyState(VK_MENU) < 0 ? F_ALT : 0) | (GetAsyncKeyState(VK_LWIN) < 0 || GetAsyncKeyState(VK_RWIN) < 0 ? F_WIN : 0);
+}
+static bool TrModifiersDown() { return (TrFlags() & (F_SHIFT | F_CONTROL | F_ALT | F_WIN)) != 0; }
+static bool TrHotkeyIs(int hk, Uint16 key, unsigned f) {
+    if (!hk || key == KEY_EMPTY || GET_SWITCH_KEY(hk) != key) return false;
+    return HAS_CONTROL(hk) == GET_BOOL(f & F_CONTROL) && HAS_OPTION(hk) == GET_BOOL(f & F_ALT) &&
+           HAS_COMMAND(hk) == GET_BOOL(f & F_WIN) && HAS_SHIFT(hk) == GET_BOOL(f & F_SHIFT);
+}
+static bool TrIsModifierVk(DWORD vk) {
+    switch (vk) { case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT: case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL: case VK_MENU: case VK_LMENU:
+                  case VK_RMENU: case VK_LWIN: case VK_RWIN: case VK_CAPITAL: case VK_NUMLOCK: case VK_SCROLL: return true; }
+    return false;
+}
+/// A swallowed Alt+key or Win+key: releasing Alt would open the app's menu bar, releasing Win the Start menu, as if Alt or
+/// Win had been tapped alone. An unassigned key in between (0xE8, as AutoHotkey does) makes it a chord again.
+static void TrMaskRelease(unsigned f) {
+    if (!(f & (F_ALT | F_WIN))) return;
+    INPUT in[2]; inputKey(in[0], 0xE8, true); inputKey(in[1], 0xE8, false); SendInput(2, in, sizeof(INPUT));
+}
+static HWND TrFocusNow() {
+    GUITHREADINFO gi = {}; gi.cbSize = sizeof(gi);
+    HWND fg = GetForegroundWindow();
+    return GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi) ? gi.hwndFocus : nullptr;
+}
+
+// Our output waits until the user lets go of Alt, Ctrl, Shift and Win: typed with Alt still down, the characters would
+// be Alt+letter shortcuts in the app.
+static std::function<void()> _trWaiting; static UINT_PTR _trTimer = 0; static int _trWaitTicks = 0;
+static void CALLBACK TrWaitTimer(HWND, UINT, UINT_PTR, DWORD) {
+    if (TrModifiersDown() && ++_trWaitTicks < 330) return;   // up to 10 s
+    KillTimer(nullptr, _trTimer); _trTimer = 0;
+    auto f = _trWaiting; _trWaiting = nullptr;
+    if (_trWaitTicks >= 330) { TrForget(); return; }
+    if (f) f();
+}
+static void TrWhenKeysUp(std::function<void()> f) {
+    if (!TrModifiersDown()) { f(); return; }
+    _trWaiting = f; _trWaitTicks = 0;
+    if (!_trTimer) _trTimer = SetTimer(nullptr, 0, 30, TrWaitTimer);
+}
+
+/// What Backspace has to remove for this text: one per character (a surrogate pair is one).
+static int TrBackspaces(const std::wstring& t) {
+    int n = 0;
+    for (size_t i = 0; i < t.size(); i++) { if (IS_HIGH_SURROGATE(t[i]) && i + 1 < t.size() && IS_LOW_SURROGATE(t[i + 1])) i++; n++; }
+    return n;
+}
+/// Types the text; a line break is Shift+Enter (a plain Enter sends the message in a chat app), or a space when the
+/// original had none.
+static void TrBatchType(const std::wstring& t, bool keepLines) {
+    for (wchar_t c : t) {
+        if (c == L'\n') {
+            if (!keepLines) { wchar_t sp = L' '; batchText(&sp, 1); continue; }
+            INPUT a, b, c2, d; inputKey(a, VK_SHIFT, true); inputKey(b, VK_RETURN, true); inputKey(c2, VK_RETURN, false); inputKey(d, VK_SHIFT, false);
+            _batch.push_back(a); _batch.push_back(b); _batch.push_back(c2); _batch.push_back(d);
+        } else batchText(&c, 1);
+    }
+}
+static std::wstring TrTypedForm(const std::wstring& t, bool keepLines) {
+    if (keepLines) return t;
+    std::wstring o = t; for (auto& c : o) if (c == L'\n') c = L' '; return o;
+}
+/// Puts newText where oldText is: Backspaces over oldText, or Ctrl+A over the whole field.
+static void TrReplace(const std::wstring& oldText, const std::wstring& newText, bool whole, bool keepLines) {
+    resetTyping(); _autoFixUndo.active = false;
+    tr::suppress = true;
+    if (whole) {
+        INPUT a, b, c, d; inputKey(a, VK_CONTROL, true); inputKey(b, 'A', true); inputKey(c, 'A', false); inputKey(d, VK_CONTROL, false);
+        _batch.push_back(a); _batch.push_back(b); _batch.push_back(c); _batch.push_back(d);
+    } else batchBackspaces(TrBackspaces(oldText));
+    TrBatchType(newText, keepLines);
+    flushBatch();
+    tr::suppress = false;
+    tr::buf = TrTypedForm(newText, keepLines);   // what is right before the cursor now
+    tr::incomplete = false;
+}
+
+static std::wstring TrPref(const wchar_t* key, const wchar_t* fallback) { return prefs::getString(key, fallback); }
+
+static void TrSend() {
+    translate::Request q;
+    q.text = tr::source; q.source = TrPref(L"TranslateSource", L"vi"); q.target = TrPref(L"TranslateTarget", L"en");
+    q.variant = tr::variant; q.id = ++tr::reqId;
+    tr::onScreen = tr::state == tr::Replaced ? tr::shown : tr::source;
+    tr::state = tr::Pending; tr::pendingSince = tr::lastUse = GetTickCount64();
+    translate::request(q);
+    TrNotify(0, L"");
+}
+
+/// The translate key (called from the hook: quick, the request runs on its own thread).
+static void TrPressed() {
+    if (!tr::enabled) return;
+    if (!translate::configured()) { TrNotify(1, L"Chưa cài đặt API dịch: chuột phải icon Vikey → Cài đặt dịch…"); return; }
+    if (tr::state == tr::Pending || tr::state == tr::Reading) return;
+    tr::reqWindow = GetForegroundWindow(); tr::reqFocus = TrFocusNow();
+    if (tr::state == tr::Replaced) { tr::variant++; TrSend(); return; }   // another wording of the same text
+    tr::variant = 0;
+    bool blank = true; for (wchar_t c : tr::buf) if (c != L' ' && c != L'\n') blank = false;
+    if (!blank && !tr::incomplete) { tr::source = tr::buf; tr::wholeField = false; TrSend(); return; }
+    // nothing typed since the cursor moved, or typing buf couldn't follow: translate the whole field, read through UI
+    // Automation (not the clipboard, whose history would keep it)
+    tr::state = tr::Reading; unsigned id = ++tr::reqId; HWND o = tr::owner;
+    std::thread([id, o] {
+        std::wstring t; int rc = site::readFocusedField(t);
+        { std::lock_guard<std::mutex> g(tr::fieldMutex); TrWipe(tr::field); tr::field = t; tr::fieldRc = rc; tr::fieldId = id; }
+        TrWipe(t);
+        PostMessageW(o, WM_TR_FIELD, id, 0);
+    }).detach();
+    TrNotify(0, L"");
+}
+
+static void TrFieldRead(unsigned id) {
+    std::wstring t; int rc;
+    { std::lock_guard<std::mutex> g(tr::fieldMutex); if (tr::fieldId != id) return; t = tr::field; TrWipe(tr::field); rc = tr::fieldRc; }
+    if (id != tr::reqId || tr::state != tr::Reading) { TrWipe(t); return; }
+    tr::state = tr::Idle; TrNotify(0, L"");
+    if (GetForegroundWindow() != tr::reqWindow) { TrWipe(t); return; }
+    std::wstring n; for (size_t i = 0; i < t.size(); i++) { if (t[i] == L'\r') { if (i + 1 < t.size() && t[i + 1] == L'\n') continue; n += L'\n'; } else n += t[i]; }
+    TrWipe(t);
+    bool blank = true; for (wchar_t c : n) if (c != L' ' && c != L'\n' && c != L'\t') blank = false;
+    if (rc == 2) { TrWipe(n); TrNotify(1, L"Ô đang chọn là ô mật khẩu hoặc chỉ đọc: không dịch"); return; }
+    if (rc != 0) { TrNotify(1, L"Không đọc được ô chat này. Gõ lại đoạn cần dịch rồi bấm phím dịch"); return; }
+    if (blank) { TrWipe(n); TrNotify(1, L"Ô chat đang trống"); return; }
+    if (n.size() > 4000) { TrWipe(n); TrNotify(1, L"Đoạn quá dài để dịch (tối đa 4000 ký tự)"); return; }
+    tr::source = n; TrWipe(n); tr::wholeField = true; TrSend();
+}
+
+static void TrTranslated(unsigned id) {
+    translate::Result r;
+    if (!translate::take(id, r)) return;
+    if (id != tr::reqId || tr::state != tr::Pending) { TrWipe(r.text); return; }
+    if (!r.ok) {
+        tr::state = tr::variant > 0 ? tr::Replaced : tr::Idle;   // after a failed re-wording the last translation is still on screen
+        TrNotify(0, L""); TrNotify(1, r.error); return;
+    }
+    // the spaces and line breaks around the original stay (the translator trims them): " bạn" typed after a word → " you"
+    size_t lead = 0, trail = 0;
+    while (lead < tr::source.size() && (tr::source[lead] == L' ' || tr::source[lead] == L'\n')) lead++;
+    while (trail < tr::source.size() - lead && (tr::source[tr::source.size() - 1 - trail] == L' ' || tr::source[tr::source.size() - 1 - trail] == L'\n')) trail++;
+    std::wstring text = tr::source.substr(0, lead) + r.text + tr::source.substr(tr::source.size() - trail); TrWipe(r.text);
+    TrWhenKeysUp([text, id]() mutable {
+        if (tr::state != tr::Pending || id != tr::reqId) { TrWipe(text); return; }
+        if (GetForegroundWindow() != tr::reqWindow || TrFocusNow() != tr::reqFocus) {
+            TrWipe(text); TrForget(); TrNotify(1, L"Đã đổi cửa sổ trong lúc dịch: bỏ bản dịch"); return;
+        }
+        bool keepLines = tr::source.find(L'\n') != std::wstring::npos;
+        TrReplace(tr::onScreen, text, tr::wholeField, keepLines);
+        tr::shown = TrTypedForm(text, keepLines); TrWipe(text); TrWipe(tr::onScreen);
+        tr::state = tr::Replaced; tr::lastUse = GetTickCount64();
+        TrNotify(0, L"");
+    });
+}
+
+/// Backspace right after a translation: the original text comes back (and stays tracked, ready to edit and translate again).
+static void TrUndo() {
+    if (tr::state != tr::Replaced) return;
+    tr::state = tr::Idle;   // now, in the hook: a second Backspace right after is an ordinary one
+    TrWhenKeysUp([] {
+        bool keepLines = tr::source.find(L'\n') != std::wstring::npos;
+        TrReplace(tr::shown, tr::source, tr::wholeField, keepLines);
+        TrWipe(tr::shown); TrWipe(tr::source);
+        TrNotify(0, L"");
+    });
+}
+
+/// Source Vietnamese: type in Vietnamese. Another source language: English mode, so Telex leaves the words alone.
+static void TrApplyPairLanguage() {
+    std::wstring src = TrPref(L"TranslateSource", L"vi");
+    if (src == L"vi") setLanguageQuiet(1); else if (src != L"auto") setLanguageQuiet(0);
+}
+
+static LRESULT CALLBACK keyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode != HC_ACTION) return CallNextHookEx(_kbHook, nCode, wParam, lParam);
+    KBDLLHOOKSTRUCT* k = (KBDLLHOOKSTRUCT*)lParam;
+    if (k->dwExtraInfo == VIKEY_EVENT_TAG) return CallNextHookEx(_kbHook, nCode, wParam, lParam);   // our own output
+    bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
+    bool modifier = TrIsModifierVk(k->vkCode);
+    if (!down && k->vkCode == tr::hotkeyVk) tr::hotkeyVk = 0;
+    if (down && !modifier) {
+        unsigned f = TrFlags();
+        Uint16 key = engineKey(k->vkCode);
+        bool toggle = TrHotkeyIs(_trToggleKey, key, f);
+        bool press = !toggle && tr::enabled && TrHotkeyIs(_trHotkey, key, f) && !site::focusedIsPassword() && !TrSensitiveApp();
+        if (toggle || press) {
+            if (k->vkCode == tr::hotkeyVk) return 1;   // held down: once per press
+            tr::hotkeyVk = k->vkCode;
+            TrMaskRelease(f); cancelModifierHotkey();
+            if (toggle) PostMessageW(tr::owner, WM_TR_TOGGLE, 0, 0); else TrPressed();
+            return 1;
+        }
+        if (tr::enabled) {
+            if (tr::state == tr::Pending || tr::state == tr::Reading) {
+                if (k->vkCode == VK_ESCAPE) { TrForget(); return 1; }
+                if (!windowsShortcut(k->vkCode, f) && !deviceKey(k->vkCode)) return 1;   // swallowed until the translation is in
+                TrForget();   // Alt+Tab, Win+D...: give the translation up, the key goes on
+            } else if (tr::state == tr::Replaced) {
+                if (k->vkCode == VK_BACK && !(f & (F_CONTROL | F_ALT | F_WIN))) { TrUndo(); return 1; }
+                // typing on after a translation: only what comes next is tracked, the translation stays as it is
+                TrJump(); TrWipe(tr::source); TrWipe(tr::shown); tr::state = tr::Idle; TrNotify(0, L"");
+            }
+        }
+    }
+    _passed = false;
+    LRESULT r = keyboardHookInner(nCode, wParam, lParam);
+    if (down && !modifier && _passed) TrNotePassedKey(k->vkCode);
+    return r;
+}
+
+bool translateEnabled() { return tr::enabled; }
+bool translateBusy() { return tr::state == tr::Pending || tr::state == tr::Reading; }
+void setTranslateWindow(HWND owner) { tr::owner = owner; }
+void setTranslateObserver(std::function<void(int, const std::wstring&)> f) { tr::observer = f; }
+void setTranslateEnabled(bool on) {
+    if (tr::state != tr::Idle) TrForget();
+    TrJump();
+    tr::enabled = on; tr::lastUse = GetTickCount64();
+    if (on) TrApplyPairLanguage();
+    TrNotify(0, L"");
+}
+void translatePairChanged() { if (tr::enabled) TrApplyPairLanguage(); TrNotify(0, L""); }
+void onTranslateMessage(UINT msg, WPARAM wp) {
+    if (msg == WM_TR_TOGGLE) setTranslateEnabled(!tr::enabled);
+    else if (msg == WM_TR_FIELD) TrFieldRead((unsigned)wp);
+    else if (msg == translate::WM_TRANSLATED) TrTranslated((unsigned)wp);
+}
+void translateTick() {
+    ULONGLONG now = GetTickCount64();
+    if (tr::state == tr::Pending && now - tr::pendingSince > 15000) { TrForget(); TrNotify(1, L"Máy chủ dịch không trả lời: đã huỷ"); }
+    int minutes = prefs::getInt(L"TranslateAutoOffMinutes", 10);
+    if (tr::enabled && minutes > 0 && !translateBusy() && now - tr::lastUse > (ULONGLONG)minutes * 60000) {
+        setTranslateEnabled(false);
+        TrNotify(1, L"Chế độ dịch đã tự tắt sau " + std::to_wstring(minutes) + L" phút không dùng");
+    }
+}
 
 bool start() {
     if (_kbHook) return true;

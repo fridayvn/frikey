@@ -1,0 +1,15 @@
+# Translate mode (the fork), mock translator: Alt+T turns the tracked text into "EN:" + the text. Run: vikey_livetest translate_cases.tsv
+# name	start	keys	expected   (start "vi+t": Vietnamese typing, translate mode on)
+translate_basic	vi+t	xin chaof{alt+t}{wait}	EN:xin chào
+translate_words_with_marks	vi+t	tieengs vieetj{alt+t}{wait}	EN:tiếng việt
+translate_undo	vi+t	xin chaof{alt+t}{wait}\b	xin chào
+translate_undo_then_type	vi+t	xin chaof{alt+t}{wait}\b banj	xin chào bạn
+translate_other_key_keeps	vi+t	xin chaof{alt+t}{wait}!\b	EN:xin chào
+translate_type_on_after	vi+t	xin chaof{alt+t}{wait} banj{alt+t}{wait}	EN:xin chào EN: bạn
+translate_keys_swallowed_while_waiting	vi+t	xin chaof{alt+t}abc{wait}	EN:xin chào
+translate_backspace_tracked	en+t	hellp\bo world{alt+t}{wait}	EN:hello world
+translate_shift_enter	vi+t	dongf 1{down:shift}\n{up:shift}dongf 2{alt+t}{wait}	EN:dòng 1\ndòng 2
+translate_off_passes_alt_t	vi	xin chaof{alt+t}{wait}	xin chào
+translate_whole_field_after_click	vi+t	xin chaof{click}{alt+t}{wait}	EN:xin chào
+translate_after_click_new_part	vi+t	xin chaof{click} banj{alt+t}{wait}	xin chào EN: bạn
+translate_english_source_mode	en+t	hello there{alt+t}{wait}	EN:hello there
