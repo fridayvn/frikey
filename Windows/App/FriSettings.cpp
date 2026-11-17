@@ -22,7 +22,7 @@
 #include <string>
 
 #ifndef FRIKEY_VERSION
-#define FRIKEY_VERSION "0.2.0"
+#define FRIKEY_VERSION "0.2.2"
 #endif
 #define WIDEN2(x) L##x
 #define WIDEN(x) WIDEN2(x)
