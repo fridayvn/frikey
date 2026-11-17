@@ -34,28 +34,6 @@ enum { ID_VIET = 100, ID_ENG, ID_SETTINGS, ID_AUTOSWITCH, ID_ABOUT, ID_QUIT, ID_
 static HWND _hwnd; static NOTIFYICONDATAW _nid = {};
 static HICON _iconV, _iconE, _iconVt, _iconEt;   // ...t: translate mode on
 
-/// Draws the menu-bar glyph: a rounded square with a V or E cut out, like the macOS icon.
-static HICON makeIcon(wchar_t letter, bool dark, bool translate = false) {
-    const int S = std::max(16, GetSystemMetrics(SM_CXSMICON));   // the tray's own size at this DPI (32 at 200%, 48 at 300%)
-    HDC dc = CreateCompatibleDC(nullptr);
-    BITMAPINFO bi = {}; bi.bmiHeader.biSize = sizeof(bi.bmiHeader); bi.bmiHeader.biWidth = S; bi.bmiHeader.biHeight = -S; bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32;
-    void* bits = nullptr; HBITMAP color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    HGDIOBJ old = SelectObject(dc, color);
-    DWORD* px = (DWORD*)bits; for (int i = 0; i < S * S; i++) px[i] = 0;
-    COLORREF fg = translate ? RGB(0, 120, 215) : dark ? RGB(255, 255, 255) : RGB(0, 0, 0);   // blue: translate mode on
-    HBRUSH b = CreateSolidBrush(fg); HPEN p = CreatePen(PS_NULL, 0, 0);
-    SelectObject(dc, b); SelectObject(dc, p);
-    RoundRect(dc, S / 16, S * 3 / 32, S - S / 16, S - S * 3 / 32, S * 10 / 32, S * 10 / 32);
-    HFONT f = CreateFontW(-S * 22 / 32, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    SelectObject(dc, f); SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(1, 2, 3));
-    RECT r = {0, 1, S, S}; DrawTextW(dc, &letter, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    // punch the letter out: pixels drawn in the marker color become transparent; the rest opaque
-    for (int i = 0; i < S * S; i++) { DWORD c = px[i] & 0xFFFFFF; if (c == 0x030201) px[i] = 0; else if (c != 0) px[i] |= 0xFF000000; else px[i] = 0; }
-    SelectObject(dc, old); DeleteObject(f); DeleteObject(b); DeleteObject(p); DeleteDC(dc);
-    HBITMAP mask = CreateBitmap(S, S, 1, 1, nullptr);
-    ICONINFO ii = {TRUE, 0, 0, mask, color}; HICON h = CreateIconIndirect(&ii);
-    DeleteObject(mask); DeleteObject(color); return h;
-}
 static bool darkTaskbar() {
     HKEY h; DWORD v = 1, s = sizeof(v);
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0, KEY_READ, &h) == ERROR_SUCCESS) { RegQueryValueExW(h, L"SystemUsesLightTheme", nullptr, nullptr, (LPBYTE)&v, &s); RegCloseKey(h); }
@@ -69,8 +47,13 @@ static std::wstring languageLabel(const std::wstring& code) {
 static std::wstring pairLabel() {
     return languageLabel(vikey::prefs::getString(L"TranslateSource", L"vi")) + L" → " + languageLabel(vikey::prefs::getString(L"TranslateTarget", L"en"));
 }
-static void makeIcons(bool dark) {
-    _iconV = makeIcon(L'V', dark); _iconE = makeIcon(L'E', dark); _iconVt = makeIcon(L'V', dark, true); _iconEt = makeIcon(L'E', dark, true);
+/// The tray icons: V (Tiếng Việt, orange) and E (English, blue), with a green dot while translate mode is on. Loaded at
+/// the tray's own size for the screen's DPI, so they are sharp and fill their slot like the other tray icons.
+static void makeIcons(bool) {
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    int cx = std::max(16, GetSystemMetrics(SM_CXSMICON)), cy = std::max(16, GetSystemMetrics(SM_CYSMICON));
+    auto load = [&](int id) { return (HICON)LoadImageW(inst, MAKEINTRESOURCEW(id), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR); };
+    _iconV = load(IDI_TRAY_V); _iconE = load(IDI_TRAY_E); _iconVt = load(IDI_TRAY_V_TRANSLATE); _iconEt = load(IDI_TRAY_E_TRANSLATE);
 }
 static void updateTray(int lang) {
     bool tr = vikey::core::translateEnabled();

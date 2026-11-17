@@ -1,6 +1,10 @@
 #include <windows.h>
 #include "resource.h"
 IDI_APP ICON "FriKey.ico"
+IDI_TRAY_V ICON "Icons/tray_v.ico"
+IDI_TRAY_E ICON "Icons/tray_e.ico"
+IDI_TRAY_V_TRANSLATE ICON "Icons/tray_v_t.ico"
+IDI_TRAY_E_TRANSLATE ICON "Icons/tray_e_t.ico"
 1 24 "FriKey.manifest"
 IDR_SOUND_VI RCDATA "Sounds/SwitchToVietnamese.wav"
 IDR_SOUND_EN RCDATA "Sounds/SwitchToEnglish.wav"

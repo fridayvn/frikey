@@ -56,7 +56,7 @@ static HFONT _editFont; static HBRUSH _editBrush;
 static unsigned _testId = 0x80000000u; static bool _testing = false;
 static const UINT WM_REFRESH = WM_APP + 40;
 
-static const float NAV_W = 280, PAD_X = 40, MAX_W = 1000, CARD_GAP = 4, CARD_PAD = 18, MIN_CARD = 70, CTL_H = 32;
+static const float NAV_W = 232, PAD_X = 36, MAX_W = 1000, CARD_GAP = 4, CARD_PAD = 18, MIN_CARD = 70, CTL_H = 32;
 
 // ---- shortcuts -------------------------------------------------------------------------------
 static std::vector<std::wstring> keysOf(int hk) {
@@ -105,6 +105,7 @@ static El* find(const std::wstring& title) { for (auto& e : _els) if (e.title ==
 
 static void refreshEnabled();
 static void rebuild();
+static void drawDialog();
 
 static int langIndex(const std::wstring& code, bool withAuto) {
     int n; const translate::text::Language* l = translate::text::languages(&n);
@@ -318,7 +319,7 @@ static void layout() {
     for (auto& e : _els) {
         if (!e.edit) continue;
         D2D1_RECT_F r = e.ctlRect; float top = r.top - _scroll;
-        bool visible = top > 0 && top + CTL_H < view;
+        bool visible = top > 0 && top + CTL_H < view && _recording < 0;   // hidden under the shortcut dialog
         float lineH = 20;
         MoveWindow(e.edit, (int)std::lround((r.left + 11) * _s), (int)std::lround((top + (CTL_H - lineH) / 2) * _s),
                    (int)std::lround((r.right - r.left - 22) * _s), (int)std::lround(lineH * _s), TRUE);
@@ -364,24 +365,30 @@ static void drawToggle(const D2D1_RECT_F& r, bool on, bool hover, bool enabled) 
         float k = hover ? 7 : 6; fill(_rt, R(sx + 10 - k, sy + 10 - k, 2 * k, 2 * k), k, enabled ? t.text2 : t.text3);
     }
 }
-static void drawKeys(const D2D1_RECT_F& r, int hk, bool recording, bool hover, bool enabled) {
+/// Key caps ending at `right` (centred on it with center=true); returns their total width.
+static float drawCaps(const std::vector<std::wstring>& keys, float right, float top, float h, float size, bool accent, bool enabled, bool center = false) {
     const Theme& t = theme();
-    if (recording) {
-        fill(_rt, r, 4, t.control); stroke(_rt, r, 4, t.accent, 2);
-        text(_rt, L"Bấm tổ hợp phím…  Esc: huỷ", font(13), r, t.text2, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        return;
+    float gap = h * 0.18f, total = 0; std::vector<float> ws;
+    for (auto& k : keys) { float w = std::max(h * 1.15f, measureWidth(k, font(size, 600)) + h * 0.7f); ws.push_back(w); total += w; }
+    total += gap * (keys.empty() ? 0 : keys.size() - 1);
+    float x = center ? right - total / 2 : right - total;
+    for (size_t i = 0; i < keys.size(); i++) {
+        D2D1_RECT_F k = R(x, top, ws[i], h);
+        if (accent && enabled) fill(_rt, k, h * 0.16f, t.accent);
+        else { fill(_rt, k, h * 0.16f, enabled ? t.control : t.subtle); stroke(_rt, k, h * 0.16f, t.controlStroke); line(_rt, k.left + 4, k.bottom - 0.5f, k.right - 4, k.bottom - 0.5f, t.controlBottom); }
+        text(_rt, keys[i], font(size, 600), k, accent && enabled ? t.accentText : enabled ? t.text : t.text3, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        x += ws[i] + gap;
     }
+    return total;
+}
+static void drawKeys(const D2D1_RECT_F& r, int hk, bool, bool hover, bool enabled) {
+    const Theme& t = theme();
+    D2D1_RECT_F pen = R(r.right - 32, r.top, 32, r.bottom - r.top);   // the edit button
+    if (hover && enabled) fill(_rt, pen, 4, t.subtleHover);
+    text(_rt, std::wstring(1, (wchar_t)0xE70F), icons(14), pen, enabled ? t.text : t.text3);
     std::vector<std::wstring> keys = keysOf(hk);
-    float x = r.right - 32;   // a pencil at the right end
-    text(_rt, std::wstring(1, (wchar_t)0xE70F), icons(14), R(x, r.top, 32, r.bottom - r.top), enabled ? (hover ? t.accent : t.text2) : t.text3);
-    if (keys.empty()) { text(_rt, L"Chưa đặt", font(14), D2D1::RectF(r.left, r.top, x - 4, r.bottom), t.text3, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER); return; }
-    for (int i = (int)keys.size() - 1; i >= 0; i--) {
-        float w = std::max(32.0f, measureWidth(keys[i], font(13, 600)) + 20);
-        x -= w + 6;
-        D2D1_RECT_F k = R(x, r.top, w, r.bottom - r.top);
-        fill(_rt, k, 4, enabled ? (hover ? t.accentHover : t.accent) : t.subtle);
-        text(_rt, keys[i], font(13, 600), k, enabled ? t.accentText : t.text3, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    }
+    if (keys.empty()) { text(_rt, L"Chưa đặt", font(14), D2D1::RectF(r.left, r.top, pen.left - 10, r.bottom), t.text3, DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER); return; }
+    drawCaps(keys, pen.left - 10, r.top, r.bottom - r.top, 13, true, enabled);
 }
 static void drawSeg(const El& e, const D2D1_RECT_F& r, bool enabled) {
     const Theme& t = theme();
@@ -408,19 +415,19 @@ static void paint() {
     _rt->BeginDraw(); _rt->Clear(t.bg);
     _rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
     // navigation
-    logo(_rt, 24, 22, 36);
-    text(_rt, L"FriKey", font(18, 700), R(72, 20, NAV_W - 80, 24), t.text);
-    text(_rt, L"Vietnamese Input by Friday", font(12), R(72, 43, NAV_W - 80, 18), t.text2);
+    logo(_rt, 18, 18, 32);
+    text(_rt, L"FriKey", font(16, 700), R(60, 16, NAV_W - 64, 22), t.text);
+    text(_rt, L"Vietnamese Input by Friday", font(11), R(60, 37, NAV_W - 64, 16), t.text2);
     static const struct { wchar_t icon; const wchar_t* label; } NAV[] = {{IC_KEYBOARD, L"Gõ tiếng Việt"}, {IC_GLOBE, L"Dịch"}, {IC_INFO, L"Giới thiệu"}};
     for (int i = 0; i < 3; i++) {
-        D2D1_RECT_F r = R(8, 92 + i * 44.0f, NAV_W - 16, 40);
+        D2D1_RECT_F r = R(8, 72 + i * 40.0f, NAV_W - 16, 36);
         if (i == _page) fill(_rt, r, 4, t.subtleHover); else if (i == _hoverNav) fill(_rt, r, 4, t.subtle);
-        if (i == _page) fill(_rt, R(r.left, r.top + 12, 3, 16), 1.5f, t.accent);
-        text(_rt, std::wstring(1, NAV[i].icon), icons(16), R(r.left + 12, r.top, 24, 40), t.text);
+        if (i == _page) fill(_rt, R(r.left, r.top + 10, 3, 16), 1.5f, t.accent);
+        text(_rt, std::wstring(1, NAV[i].icon), icons(16), R(r.left + 12, r.top, 24, 36), t.text);
         text(_rt, NAV[i].label, font(14, i == _page ? 600 : 400), D2D1::RectF(r.left + 48, r.top, r.right, r.bottom), t.text, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
     std::wstring ver = L"Phiên bản " WIDEN(FRIKEY_VERSION);
-    text(_rt, ver, font(12), R(24, H - 34, NAV_W - 40, 18), t.text3);
+    text(_rt, ver, font(11.5f), R(20, H - 30, NAV_W - 32, 16), t.text3);
     // content
     _rt->PushAxisAlignedClip(D2D1::RectF(NAV_W, 0, W, H), D2D1_ANTIALIAS_MODE_ALIASED);
     for (int i = 0; i < (int)_els.size(); i++) {
@@ -473,22 +480,109 @@ static void paint() {
         fill(_rt, R(W - 7, ty + 2, 3, th - 4), 1.5f, t.text3);
     }
     _rt->PopAxisAlignedClip();
+    drawDialog();
     if (_rt->EndDraw() == D2DERR_RECREATE_TARGET) { _rt->Release(); _rt = nullptr; }
 }
 
-// ---- actions ---------------------------------------------------------------------------------
+// ---- the shortcut dialog (like PowerToys: press the keys, see them, Lưu) -------------------------------
+static int _dlgValue = 0, _dlgHeld = 0, _dlgHover = 0; static bool _dlgValid = false, _dlgKeyInChord = false; static std::wstring _dlgMsg;
+enum { DB_NONE, DB_SAVE, DB_CANCEL, DB_DEFAULT };
+static int defaultHotkey(const std::wstring& pref) {
+    if (pref == L"SwitchKeyStatus") return 0x7A000206 & 0xFFFF;
+    if (pref == L"TranslateHotkey") return KEY_T | 0x200;
+    if (pref == L"TranslateToggleHotkey") return KEY_T | 0x200 | 0x800;
+    return 0;
+}
+static std::wstring ruleOf(const El& e) {
+    return e.modsOnly ? L"Một phím kèm Ctrl, Alt, Shift hoặc Win, hoặc chỉ hai phím bổ trợ (ví dụ Ctrl+Shift)" : L"Một phím kèm Ctrl, Alt hoặc Win (có thể thêm Shift)";
+}
+static D2D1_RECT_F dlgRect() {
+    RECT rc; GetClientRect(_w, &rc); float W = rc.right / _s, H = rc.bottom / _s, dw = 480, dh = 300;
+    return R((W - dw) / 2, (H - dh) / 2, dw, dh);
+}
+static D2D1_RECT_F dlgButton(int which) {
+    D2D1_RECT_F d = dlgRect(); float y = d.bottom - 24 - 32, bw = 120;
+    if (which == DB_SAVE) return R(d.right - 24 - 2 * bw - 8, y, bw, 32);
+    if (which == DB_CANCEL) return R(d.right - 24 - bw, y, bw, 32);
+    return R(d.left + 24, y, bw, 32);
+}
+static int dlgHit(float x, float y) { for (int b : {DB_SAVE, DB_CANCEL, DB_DEFAULT}) if (inside(dlgButton(b), x, y)) return b; return DB_NONE; }
 static void stopRecording() {
     if (_recording < 0) return;
-    _recording = -1; core::setKeysPaused(false); InvalidateRect(_w, nullptr, FALSE);
+    _recording = -1; core::setKeysPaused(false); layout(); InvalidateRect(_w, nullptr, FALSE);
+}
+static void openDialog(int i) {
+    stopRecording();
+    _recording = i; _dlgValue = _els[i].hotkey; _dlgHeld = 0; _dlgValid = false; _dlgKeyInChord = false; _dlgHover = DB_NONE; _dlgMsg = ruleOf(_els[i]);
+    core::setKeysPaused(true); SetFocus(_w); layout(); InvalidateRect(_w, nullptr, FALSE);
+}
+/// A combination was pressed: can it be used here?
+static void tryCombination(int value) {
+    El& e = _els[_recording];
+    _dlgValue = value; _dlgValid = false;
+    if (!e.modsOnly && !(value & 0x700)) { _dlgMsg = L"Cần có Ctrl, Alt hoặc Win: Shift với một phím là chữ hoa"; return; }
+    if (clashes(e.pref, value)) { _dlgMsg = L"Tổ hợp này đã dùng cho việc khác trong FriKey"; return; }
+    _dlgValid = true; _dlgMsg = L"Bấm Lưu (hoặc Enter) để dùng tổ hợp này";
+}
+static void drawDialog() {
+    if (_recording < 0) return;
+    const Theme& t = theme(); El& e = _els[_recording];
+    RECT rc; GetClientRect(_w, &rc);
+    fill(_rt, D2D1::RectF(0, 0, rc.right / _s, rc.bottom / _s), 0, D2D1::ColorF(0, 0, 0, t.dark ? 0.45f : 0.3f));
+    D2D1_RECT_F d = dlgRect();
+    fill(_rt, d, 8, t.dark ? D2D1::ColorF(0x2B2B2B) : D2D1::ColorF(0xFFFFFF));
+    fill(_rt, D2D1::RectF(d.left, d.bottom - 80, d.right, d.bottom), 8, t.bg);   // the button bar
+    fill(_rt, D2D1::RectF(d.left, d.bottom - 80, d.right, d.bottom - 70), 0, t.bg);
+    line(_rt, d.left, d.bottom - 80, d.right, d.bottom - 80, t.cardStroke);
+    stroke(_rt, d, 8, t.cardStroke);
+    text(_rt, L"Đặt phím tắt", font(20, 600), R(d.left + 24, d.top + 22, d.right - d.left - 48, 28), t.text);
+    text(_rt, e.title, font(13), R(d.left + 24, d.top + 52, d.right - d.left - 48, 18), t.text2);
+    // the keys: the modifiers held right now, else the combination pressed, else the current one
+    std::vector<std::wstring> keys; bool accent = false;
+    if (_dlgHeld) keys = keysOf(0xFE | _dlgHeld);
+    else { keys = keysOf(_dlgValue); accent = _dlgValid || _dlgValue == e.hotkey; }
+    D2D1_RECT_F stage = R(d.left + 24, d.top + 84, d.right - d.left - 48, 84);
+    fill(_rt, stage, 6, t.subtle);
+    if (keys.empty()) text(_rt, L"Bấm tổ hợp phím…", font(15), stage, t.text3, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    else drawCaps(keys, (stage.left + stage.right) / 2, stage.top + 18, 48, 18, accent, true, true);
+    bool bad = !_dlgValid && !_dlgHeld && _dlgMsg != ruleOf(e);
+    text(_rt, std::wstring(1, bad ? (wchar_t)0xE783 : (wchar_t)0xE946), icons(13), R(d.left + 24, d.top + 178, 18, 20), bad ? t.danger : t.text2);
+    text(_rt, _dlgMsg, font(12.5f), R(d.left + 48, d.top + 179, d.right - d.left - 72, 36), bad ? t.danger : t.text2);
+    drawButton(dlgButton(DB_SAVE), L"Lưu", true, _dlgHover == DB_SAVE, _dlgValid);
+    drawButton(dlgButton(DB_CANCEL), L"Huỷ", false, _dlgHover == DB_CANCEL, true);
+    drawButton(dlgButton(DB_DEFAULT), L"Mặc định", false, _dlgHover == DB_DEFAULT, true);
+}
+static void dialogKey(UINT msg, DWORD vk) {
+    El& e = _els[_recording];
+    bool ctrl = GetKeyState(VK_CONTROL) < 0, alt = GetKeyState(VK_MENU) < 0, shift = GetKeyState(VK_SHIFT) < 0, win = GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0;
+    bool isMod = vk == VK_CONTROL || vk == VK_MENU || vk == VK_SHIFT || vk == VK_LWIN || vk == VK_RWIN || vk == VK_LCONTROL || vk == VK_RCONTROL ||
+                 vk == VK_LMENU || vk == VK_RMENU || vk == VK_LSHIFT || vk == VK_RSHIFT;
+    int mods = (ctrl ? 0x100 : 0) | (alt ? 0x200 : 0) | (win ? 0x400 : 0) | (shift ? 0x800 : 0);
+    bool down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+    if (down) {
+        if (!mods && vk == VK_ESCAPE) { stopRecording(); return; }
+        if (!mods && vk == VK_RETURN) { if (_dlgValid) PostMessageW(_w, WM_COMMAND, 0xF00D, 0); return; }
+        if (isMod) { if (!_dlgHeld) _dlgKeyInChord = false; _dlgHeld = mods; }
+        else {
+            int key = (int)engineKey(vk);
+            if (key != KEY_EMPTY && mods) { _dlgKeyInChord = true; _dlgHeld = 0; tryCombination(key | mods); }
+            else if (key != KEY_EMPTY) { _dlgValue = 0; _dlgValid = false; _dlgMsg = ruleOf(e); }
+        }
+    } else if (isMod) {
+        // modifiers let go with no key in between: the modifiers alone (the switch shortcut only, two or more)
+        int was = _dlgHeld;
+        if (was && !_dlgKeyInChord) {
+            int n = !!(was & 0x100) + !!(was & 0x200) + !!(was & 0x400) + !!(was & 0x800);
+            if (e.modsOnly && n >= 2) tryCombination(0xFE | was);
+        }
+        _dlgHeld = 0;
+        if (!mods) _dlgKeyInChord = false;
+    }
+    InvalidateRect(_w, nullptr, FALSE);
 }
 static void commitHotkey(int value) {
     if (_recording < 0) return;
     El& e = _els[_recording];
-    if (!e.modsOnly && !(value & 0x700)) { MessageBeep(MB_ICONWARNING); return; }   // needs Ctrl, Alt or Win: Shift+letter is a capital
-    if (clashes(e.pref, value)) {
-        MessageBeep(MB_ICONWARNING); std::wstring d = e.desc;
-        e.desc = L"Tổ hợp " + hotkeyText(value) + L" đã dùng cho việc khác. Chọn tổ hợp khác"; layout(); InvalidateRect(_w, nullptr, FALSE); (void)d; return;
-    }
     if (e.pref == L"SwitchKeyStatus") value |= switchKey() & 0x8000;
     prefs::setInt(e.pref.c_str(), value); e.hotkey = value;
     core::reloadSettings(); if (e.pref == L"EmojiHotkey") emoji::settingsChanged();
@@ -521,8 +615,7 @@ static void clickElement(int i, float x, float y) {
         if (id > 0 && id - 1 != e.index) { e.index = id - 1; if (e.change) e.change(e); }
         break; }
     case C_HOTKEY:
-        if (_recording == i) { stopRecording(); break; }
-        stopRecording(); _recording = i; core::setKeysPaused(true); SetFocus(_w); break;
+        openDialog(i); break;
     case C_BUTTON: case C_ACCENT: if (e.change) e.change(e); break;
     case C_LINK: ShellExecuteW(_w, L"open", e.url.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
     case C_SEG: {
@@ -547,7 +640,7 @@ static int hitEl(float x, float y, bool* onBtn = nullptr) {
     }
     return -1;
 }
-static int hitNav(float x, float y) { for (int i = 0; i < 3; i++) if (inside(R(8, 92 + i * 44.0f, NAV_W - 16, 40), x, y)) return i; return -1; }
+static int hitNav(float x, float y) { for (int i = 0; i < 3; i++) if (inside(R(8, 72 + i * 40.0f, NAV_W - 16, 36), x, y)) return i; return -1; }
 
 static void setPage(int p) { if (p == _page) return; stopRecording(); _page = p; _scroll = 0; build(); layout(); InvalidateRect(_w, nullptr, FALSE); }
 
@@ -586,6 +679,7 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM lp) {
         if (ns != _scroll) { _scroll = ns; layout(); InvalidateRect(h, nullptr, FALSE); }
         return 0; }
     case WM_MOUSEMOVE: {
+        if (_recording >= 0) { int b = dlgHit(GET_X_LPARAM(lp) / _s, GET_Y_LPARAM(lp) / _s); if (b != _dlgHover) { _dlgHover = b; InvalidateRect(h, nullptr, FALSE); } return 0; }
         TRACKMOUSEEVENT tme = {sizeof(tme), TME_LEAVE, h, 0}; TrackMouseEvent(&tme);
         float x = GET_X_LPARAM(lp) / _s, y = GET_Y_LPARAM(lp) / _s; bool onBtn;
         int i = hitEl(x, y, &onBtn), n = hitNav(x, y);
@@ -597,38 +691,37 @@ static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM lp) {
         break;
     case WM_LBUTTONDOWN: {
         float x = GET_X_LPARAM(lp) / _s, y = GET_Y_LPARAM(lp) / _s;
+        if (_recording >= 0) { _pressed = dlgHit(x, y); return 0; }
         _pressed = hitEl(x, y); _pressedNav = hitNav(x, y);
-        if (_recording >= 0 && _pressed != _recording) stopRecording();
         SetFocus(h); SetCapture(h); return 0; }
     case WM_LBUTTONUP: {
         ReleaseCapture();
         float x = GET_X_LPARAM(lp) / _s, y = GET_Y_LPARAM(lp) / _s;
+        if (_recording >= 0) {
+            int b = dlgHit(x, y);
+            if (b != DB_NONE && b == _pressed) {
+                if (b == DB_SAVE && _dlgValid) commitHotkey(_dlgValue);
+                else if (b == DB_CANCEL) stopRecording();
+                else if (b == DB_DEFAULT) {
+                    int d = defaultHotkey(_els[_recording].pref);
+                    if (d) tryCombination(d); else { _dlgValue = 0; _dlgValid = true; _dlgMsg = L"Bấm Lưu để bỏ phím tắt này"; }
+                    InvalidateRect(h, nullptr, FALSE);
+                }
+            }
+            _pressed = -1; return 0;
+        }
         int i = hitEl(x, y), n = hitNav(x, y);
         if (n >= 0 && n == _pressedNav) setPage(n);
         else if (i >= 0 && i == _pressed) clickElement(i, x, y);
         _pressed = _pressedNav = -1; return 0; }
-    case WM_KEYDOWN: case WM_SYSKEYDOWN: {
+    case WM_KEYDOWN: case WM_SYSKEYDOWN: case WM_KEYUP: case WM_SYSKEYUP:
         if (_recording < 0) break;
-        DWORD vk = (DWORD)w;
-        bool ctrl = GetKeyState(VK_CONTROL) < 0, alt = GetKeyState(VK_MENU) < 0, shift = GetKeyState(VK_SHIFT) < 0, win = GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0;
-        if (vk == VK_ESCAPE && !ctrl && !alt && !win && !shift) { stopRecording(); return 0; }
-        if (vk == VK_CONTROL || vk == VK_MENU || vk == VK_SHIFT || vk == VK_LWIN || vk == VK_RWIN) return 0;
-        int key = (int)engineKey(vk); if (key == KEY_EMPTY) return 0;
-        if (!(ctrl || alt || win || shift)) return 0;
-        commitHotkey(key | (ctrl ? 0x100 : 0) | (alt ? 0x200 : 0) | (win ? 0x400 : 0) | (shift ? 0x800 : 0));
-        return 0; }
-    case WM_KEYUP: case WM_SYSKEYUP: {
-        if (_recording < 0 || !_els[_recording].modsOnly) break;
-        DWORD vk = (DWORD)w; if (!(vk == VK_CONTROL || vk == VK_MENU || vk == VK_SHIFT || vk == VK_LWIN || vk == VK_RWIN)) return 0;
-        int mods = (vk == VK_CONTROL || GetKeyState(VK_CONTROL) < 0 ? 0x100 : 0) | (vk == VK_MENU || GetKeyState(VK_MENU) < 0 ? 0x200 : 0) |
-                   (vk == VK_LWIN || vk == VK_RWIN || GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0 ? 0x400 : 0) | (vk == VK_SHIFT || GetKeyState(VK_SHIFT) < 0 ? 0x800 : 0);
-        int n = !!(mods & 0x100) + !!(mods & 0x200) + !!(mods & 0x400) + !!(mods & 0x800);
-        if (n >= 2) commitHotkey(0xFE | mods);
-        return 0; }
+        dialogKey(m, (DWORD)w); return 0;
     case WM_SYSCHAR: case WM_CHAR: if (_recording >= 0) return 0; break;
     case WM_KILLFOCUS: stopRecording(); break;
     case WM_ACTIVATE: if (LOWORD(w) == WA_INACTIVE) stopRecording(); break;
     case WM_COMMAND:
+        if (w == 0xF00D) { if (_recording >= 0 && _dlgValid) commitHotkey(_dlgValue); return 0; }   // Enter in the shortcut dialog
         if (HIWORD(w) == EN_SETFOCUS || HIWORD(w) == EN_KILLFOCUS) {
             for (auto& e : _els) if (e.edit == (HWND)lp) { if (HIWORD(w) == EN_KILLFOCUS) saveField(e); }
             InvalidateRect(h, nullptr, FALSE);
