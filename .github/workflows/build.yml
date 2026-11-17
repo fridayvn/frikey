@@ -35,7 +35,7 @@ jobs:
           New-Item -ItemType Directory -Force ci | Out-Null
           cmake -S Windows -B build -G Ninja -DCMAKE_BUILD_TYPE=Release *>&1 | Tee-Object -FilePath ci/configure-${{ matrix.arch }}.log
           if ($LASTEXITCODE) { exit 1 }
-          cmake --build build --config Release --target vikey vikey_livetest *>&1 | Tee-Object -FilePath ci/build-${{ matrix.arch }}.log
+          cmake --build build --config Release --target vikey vikey_livetest -- -k 0 *>&1 | Tee-Object -FilePath ci/build-${{ matrix.arch }}.log
           if ($LASTEXITCODE) { exit 1 }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build/App/FriKey.exe dist/

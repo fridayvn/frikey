@@ -3,6 +3,7 @@
 #include <windowsx.h>
 #include <shellscalingapi.h>
 #include <algorithm>
+#include <cmath>
 
 namespace vikey { namespace menu {
 
