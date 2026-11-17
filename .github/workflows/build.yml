@@ -1,0 +1,96 @@
+# FriKey for Windows: built with MSVC on GitHub's Windows runners, so every FriKey.exe comes from this repository's
+# source with a public build log. Each run also checks the typing engine (rule cases, golden snapshots) and pushes
+# its logs to the `ci-log` branch, readable without signing in to Actions.
+name: build
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ninja
+        run: choco install ninja -y --no-progress
+        shell: pwsh
+      - name: Build FriKey.exe
+        id: build
+        run: |
+          New-Item -ItemType Directory -Force ci | Out-Null
+          cmake -S Windows -B build -G Ninja -DCMAKE_BUILD_TYPE=Release *>&1 | Tee-Object -FilePath ci/configure-${{ matrix.arch }}.log
+          if ($LASTEXITCODE) { exit 1 }
+          cmake --build build --config Release --target vikey vikey_livetest *>&1 | Tee-Object -FilePath ci/build-${{ matrix.arch }}.log
+          if ($LASTEXITCODE) { exit 1 }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build/App/FriKey.exe dist/
+          Copy-Item build/App/vikey_livetest.exe dist/frikey_livetest.exe
+          Copy-Item Windows/Tests/cases.tsv, Windows/Tests/translate_cases.tsv dist/
+          $h = (Get-FileHash dist/FriKey.exe -Algorithm SHA256).Hash.ToLower()
+          "$h  FriKey.exe ($env:GITHUB_SHA, ${{ matrix.arch }})" | Tee-Object -FilePath dist/SHA256.txt
+          "$h" | Out-File ci/sha256-${{ matrix.arch }}.txt
+        shell: pwsh
+      - name: Engine checks (rule cases, golden snapshots, driver parity, performance)
+        if: matrix.arch == 'x64'
+        run: |
+          pwsh Windows/check.ps1 *>&1 | Tee-Object -FilePath ci/engine-check.log
+          if ($LASTEXITCODE) { exit 1 }
+        shell: pwsh
+      - name: Translate text unit tests
+        if: matrix.arch == 'x64'
+        run: |
+          cl /nologo /std:c++17 /EHsc /utf-8 /IWindows/App Windows/Tests/translate_text_test.cpp /Fe:tt.exe *>&1 | Tee-Object -FilePath ci/translate-test-build.log
+          ./tt.exe *>&1 | Tee-Object -FilePath ci/translate-test.log
+          if ($LASTEXITCODE) { exit 1 }
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        if: steps.build.outcome == 'success'
+        with:
+          name: FriKey-windows-${{ matrix.arch }}
+          path: dist/
+      - name: Publish the logs to the ci-log branch
+        if: always()
+        run: |
+          "${{ job.status }} $env:GITHUB_SHA ${{ matrix.arch }} $(Get-Date -Format o)" | Out-File ci/status-${{ matrix.arch }}.txt
+          git config user.name "frikey-ci"; git config user.email "frikey-ci@users.noreply.github.com"
+          Copy-Item -Recurse ci $env:RUNNER_TEMP/ci-logs
+          git fetch origin ci-log 2>$null
+          if ($LASTEXITCODE -eq 0) { git checkout -f -B ci-log FETCH_HEAD } else { git checkout -f --orphan ci-log; git rm -rf -q . }
+          New-Item -ItemType Directory -Force logs | Out-Null
+          Copy-Item -Force $env:RUNNER_TEMP/ci-logs/* logs/
+          git add -f logs
+          git commit -q -m "CI ${{ matrix.arch }} ${{ job.status }} for $env:GITHUB_SHA"
+          for ($i = 0; $i -lt 3; $i++) { git push origin ci-log; if ($LASTEXITCODE -eq 0) { break }; git pull --rebase -q origin ci-log }
+        shell: pwsh
+
+  release:
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Zip each architecture
+        run: |
+          cd artifacts
+          for d in FriKey-windows-*; do (cd "$d" && zip -q -r "../../${d/FriKey-windows-/FriKey-${GITHUB_REF_NAME}-}.zip" .); done
+          ls -la ..
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: FriKey-*.zip
