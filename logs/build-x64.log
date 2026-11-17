@@ -1,0 +1,25 @@
+[1/20] Building CXX object CMakeFiles\vikey_engine.dir\D_\a\frikey\frikey\Engine\TouchModel.cpp.obj
+[2/20] Building CXX object CMakeFiles\vikey_engine.dir\D_\a\frikey\frikey\Engine\SmartSwitchKey.cpp.obj
+[3/20] Building CXX object CMakeFiles\vikey_engine.dir\D_\a\frikey\frikey\Engine\Driver.cpp.obj
+[4/20] Building CXX object App\CMakeFiles\vikey.dir\main.cpp.obj
+[5/20] Building CXX object App\CMakeFiles\vikey.dir\Prefs.cpp.obj
+[6/20] Building CXX object App\CMakeFiles\vikey.dir\Site.cpp.obj
+[7/20] Building CXX object CMakeFiles\vikey_engine.dir\D_\a\frikey\frikey\Engine\Engine.cpp.obj
+[8/20] Building CXX object App\CMakeFiles\vikey.dir\Core.cpp.obj
+[9/20] Building CXX object CMakeFiles\vikey_engine.dir\D_\a\frikey\frikey\Engine\Vietnamese.cpp.obj
+[10/20] Building CXX object App\CMakeFiles\vikey.dir\Ui.cpp.obj
+[11/20] Building CXX object App\CMakeFiles\vikey.dir\Menu.cpp.obj
+FAILED: [code=2] App/CMakeFiles/vikey.dir/Menu.cpp.obj 
+"C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\cl.exe"  /nologo /TP -DNOMINMAX -DUNICODE -DVIKEY_BUILD=\"36\" -DVIKEY_VERSION=\"1.0.34\" -DWIN32_LEAN_AND_MEAN -D_CRT_SECURE_NO_WARNINGS -D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS -D_UNICODE -ID:\a\frikey\frikey\Windows\App -ID:\a\frikey\frikey\Windows\..\Engine -ID:\a\frikey\frikey\Windows\..\Engine\platforms /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++17 -MT /utf-8 /W0 /EHsc /O2 /bigobj /showIncludes /FoApp\CMakeFiles\vikey.dir\Menu.cpp.obj /FdApp\CMakeFiles\vikey.dir\ /FS -c D:\a\frikey\frikey\Windows\App\Menu.cpp
+D:\a\frikey\frikey\Windows\App\Menu.cpp(44): error C2039: 'ceil': is not a member of 'std'
+C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\include\algorithm(172): note: see declaration of 'std'
+D:\a\frikey\frikey\Windows\App\Menu.cpp(108): error C2039: 'ceil': is not a member of 'std'
+C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\include\algorithm(172): note: see declaration of 'std'
+D:\a\frikey\frikey\Windows\App\Menu.cpp(108): error C2039: 'ceil': is not a member of 'std'
+C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.51.36231\include\algorithm(172): note: see declaration of 'std'
+[12/20] Linking CXX static library vikey_engine.lib
+[13/20] Building RC object App\CMakeFiles\vikey.dir\FriKey.rc.res
+[14/20] Building CXX object App\CMakeFiles\vikey.dir\FriSettings.cpp.obj
+[15/20] Building CXX object App\CMakeFiles\vikey.dir\Translate.cpp.obj
+[16/20] Building CXX object App\CMakeFiles\vikey.dir\Emoji.cpp.obj
+ninja: build stopped: subcommand failed.
