@@ -69,6 +69,7 @@ jobs:
           "${{ job.status }} $env:GITHUB_SHA ${{ matrix.arch }} $(Get-Date -Format o)" | Out-File ci/status-${{ matrix.arch }}.txt
           git config user.name "frikey-ci"; git config user.email "frikey-ci@users.noreply.github.com"
           Copy-Item -Recurse ci $env:RUNNER_TEMP/ci-logs
+          if (Test-Path dist/FriKey.exe) { Copy-Item dist/FriKey.exe, dist/SHA256.txt $env:RUNNER_TEMP/ci-logs/ }   # the latest build, fetchable with git
           git fetch origin ci-log 2>$null
           if ($LASTEXITCODE -eq 0) { git checkout -f -B ci-log FETCH_HEAD } else { git checkout -f --orphan ci-log; git rm -rf -q . }
           New-Item -ItemType Directory -Force logs | Out-Null
