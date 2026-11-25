@@ -26,7 +26,8 @@ static const UINT WM_TRAY = WM_APP + 1;
 static const UINT WM_VIKEY_SETLANG = WM_APP + 2;   // tests: wParam = language (0 English, 1 Vietnamese)
 static const UINT WM_VIKEY_EMOJI = WM_APP + 5;     // the emoji hotkey, posted from the keyboard hook
 static const UINT WM_TASKBARCREATED = RegisterWindowMessageW(L"TaskbarCreated");   // Explorer (re)started: the tray is empty
-static const UINT WM_VIKEY_SETTRANSLATE = WM_APP + 24;   // tests: wParam = translate mode on (1) or off (0)
+static const UINT WM_VIKEY_SETTRANSLATE = WM_APP + 24;
+static const UINT WM_FK_LANGUAGE = WM_APP + 30, WM_FK_TRANSLATE_STATE = WM_APP + 31, WM_FK_NOTICE = WM_APP + 32;   // from the hook   // tests: wParam = translate mode on (1) or off (0)
 static const UINT TIMER_FLUSH = 1;
 enum { ID_VIET = 100, ID_ENG, ID_SETTINGS, ID_AUTOSWITCH, ID_ABOUT, ID_QUIT, ID_TR_TOGGLE, ID_TR_SWAP, ID_TR_SETTINGS,
        ID_TR_SOURCE = 300, ID_TR_TARGET = 400 };   // + language index (source: 0 = auto, then the list)
@@ -98,7 +99,7 @@ static void showMenu() {
         Item i; i.id = id; i.text = text; i.hint = hint; i.checked = checked; i.enabled = enabled; return i; };
     std::vector<Item> m;
     m.push_back(item(ID_VIET, L"Gõ tiếng Việt", hotkeyLabel(), core::language() != 0));
-    m.push_back(item(ID_AUTOSWITCH, L"Tự chuyển Anh/Việt", L"", prefs::getInt(L"AutoSwitchByTyping", 1) != 0));
+    m.push_back(item(ID_AUTOSWITCH, L"Tự chuyển Anh/Việt", L"", prefs::getInt(L"AutoSwitchByTyping", 0) != 0));
     m.push_back(Item::sep());
     bool on = core::translateEnabled();
     std::wstring src = prefs::getString(L"TranslateSource", L"vi"), dst = prefs::getString(L"TranslateTarget", L"en");
@@ -143,7 +144,7 @@ static LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case ID_VIET: core::setLanguageByUser(!core::language()); break;
-        case ID_AUTOSWITCH: toggle(L"AutoSwitchByTyping", 1); break;
+        case ID_AUTOSWITCH: toggle(L"AutoSwitchByTyping", 0); break;
         case ID_SETTINGS: ui::showSettings(GetModuleHandleW(nullptr), ui::PageTyping); break;
         case ID_ABOUT: ui::showSettings(GetModuleHandleW(nullptr), ui::PageAbout); break;
         case ID_QUIT: DestroyWindow(h); break;
@@ -169,6 +170,9 @@ static LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER: if (wp == TIMER_FLUSH) { core::flushTypingLog(); core::translateTick(); } return 0;
     case core::WM_TR_TOGGLE: case core::WM_TR_FIELD: case translate::WM_TRANSLATED: core::onTranslateMessage(msg, wp); return 0;
     case WM_VIKEY_SETTRANSLATE: core::setTranslateEnabled(wp != 0); return 1;
+    case WM_FK_LANGUAGE: updateTray(core::language()); ui::languageChanged(core::language()); return 0;
+    case WM_FK_TRANSLATE_STATE: updateTray(core::language()); ui::refreshSettings(); return 0;
+    case WM_FK_NOTICE: { std::wstring* m = (std::wstring*)lp; if (m) { notifyUser(*m); delete m; } return 0; }
     case site::WM_SITE: { HWND w; std::wstring host = site::lastHost(&w); if (w == GetForegroundWindow()) core::onSiteChanged(host); return 0; }
     case WM_SETTINGCHANGE: {
         if (!lp || wcscmp((LPCWSTR)lp, L"ImmersiveColorSet") != 0) return 0;   // a theme change: every other setting broadcast is ignored
@@ -197,18 +201,21 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     _nid.cbSize = sizeof(_nid); _nid.hWnd = _hwnd; _nid.uID = 1; _nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; _nid.uCallbackMessage = WM_TRAY; _nid.hIcon = _iconV;
     wcscpy_s(_nid.szTip, L"FriKey");
     Shell_NotifyIconW(NIM_ADD, &_nid);
-    vikey::core::setLanguageObserver([](int lang) { updateTray(lang); vikey::ui::languageChanged(lang); });
+    // the observers run inside the keyboard hook: Shell_NotifyIcon waits for Explorer, and a hook that stalls is dropped by
+    // Windows (keys stop converting). So they only post, and the tray window does the work right after.
+    vikey::core::setLanguageObserver([](int) { PostMessageW(_hwnd, WM_FK_LANGUAGE, 0, 0); });
     vikey::translate::start(_hwnd);
     vikey::core::setTranslateWindow(_hwnd);
     vikey::core::setTranslateObserver([](int event, const std::wstring& message) {
-        if (event == 0) { updateTray(vikey::core::language()); vikey::ui::refreshSettings(); } else notifyUser(message);
+        if (event == 0) PostMessageW(_hwnd, WM_FK_TRANSLATE_STATE, 0, 0);
+        else { std::wstring* m = new std::wstring(message); if (!PostMessageW(_hwnd, WM_FK_NOTICE, 0, (LPARAM)m)) delete m; }
     });
     if (!vikey::core::start()) { MessageBoxW(nullptr, L"Không cài được bộ bắt phím (SetWindowsHookEx).", L"FriKey", MB_ICONERROR); return 1; }
     updateTray(vikey::core::language());
     vikey::emoji::install(inst);
     vikey::core::setEmojiHotkeyHandler([] { PostMessageW(_hwnd, WM_VIKEY_EMOJI, 0, 0); });   // not inside the hook: opening can take a moment
     if (!vikey::prefs::has(L"FirstRunDone")) { vikey::prefs::setInt(L"FirstRunDone", 1); vikey::ui::showSettings(inst, vikey::ui::PageTyping); }
-    SetTimer(_hwnd, TIMER_FLUSH, 10000, nullptr);
+    SetTimer(_hwnd, TIMER_FLUSH, 2000, nullptr);   // also translate mode's guards (translateTick)
     vikey::site::start(_hwnd);   // per-website memory and password fields, read off the hook thread
     MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
     ReleaseMutex(single); CloseHandle(single);

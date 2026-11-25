@@ -22,7 +22,7 @@
 #include <string>
 
 #ifndef FRIKEY_VERSION
-#define FRIKEY_VERSION "0.2.4"
+#define FRIKEY_VERSION "0.2.5"
 #endif
 #define WIDEN2(x) L##x
 #define WIDEN(x) WIDEN2(x)
@@ -145,7 +145,7 @@ static void pageTyping() {
 
     header(L"Tự chuyển Anh/Việt");
     toggle(0, L"Tự chuyển khi gõ", L"Gõ một từ tiếng Anh khi đang ở tiếng Việt (hoặc ngược lại), FriKey tự sửa từ đó và chuyển chế độ. Bấm Xoá ngay sau đó để hoàn tác",
-           prefs::getInt(L"AutoSwitchByTyping", 1) != 0, [](El& e) { prefs::setInt(L"AutoSwitchByTyping", e.on); core::reloadSettings(); refreshEnabled(); });
+           prefs::getInt(L"AutoSwitchByTyping", 0) != 0, [](El& e) { prefs::setInt(L"AutoSwitchByTyping", e.on); core::reloadSettings(); refreshEnabled(); });
     toggle(0, L"Tạm dừng 5 giây", L"Sau khi bạn tự bấm chuyển, FriKey không tự chuyển trong 5 giây", prefs::getInt(L"PauseAutoAfterManual", 1) != 0,
            [](El& e) { prefs::setInt(L"PauseAutoAfterManual", e.on); core::reloadSettings(); });
     toggle(0, L"Nhớ theo ứng dụng", L"Nhớ bạn gõ tiếng Anh hay tiếng Việt ở mỗi ứng dụng và tự chuyển lại khi quay về", prefs::getInt(L"UseSmartSwitchKey", 1) != 0,
@@ -262,7 +262,7 @@ static void build() {
 static void refreshEnabled() {
     if (_page != 0) return;
     for (auto& e : _els) {
-        if (e.title == L"Tạm dừng 5 giây") e.enabled = prefs::getInt(L"AutoSwitchByTyping", 1) != 0;
+        if (e.title == L"Tạm dừng 5 giây") e.enabled = prefs::getInt(L"AutoSwitchByTyping", 0) != 0;
         if (e.title == L"Nhớ theo trang web") e.enabled = prefs::getInt(L"UseSmartSwitchKey", 1) != 0;
         if (e.title == L"Trả lại phím khi sai") e.enabled = prefs::getInt(L"Spelling", 1) != 0;
         if (e.title == L"Phím mở bảng emoji") e.enabled = prefs::getInt(L"EmojiPicker", 0) != 0;

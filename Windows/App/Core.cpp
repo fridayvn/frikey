@@ -20,7 +20,7 @@
 // Settings the engine reads (see Engine.h). Same defaults as the macOS app.
 int vLanguage = 1, vSwitchKeyStatus = 0x7A000206, vCheckSpelling = 1, vUseModernOrthography = 1;
 int vRestoreIfWrongSpelling = 1, vFixRecommendBrowser = 1, vUseSmartSwitchKey = 1, vOtherLanguage = 1;
-int vAutoSwitchByTyping = 1, vPerformLayoutCompat = 0;
+int vAutoSwitchByTyping = 0, vPerformLayoutCompat = 0;   // FriKey: off unless turned on
 // Emoji picker (Settings.cpp): its hotkey (0 = off); while it is open keys go to the picker, not the engine (Windows' own shortcuts and media keys excepted)
 static int vEmojiHotkey = 0;
 static volatile bool vEmojiOpen = false;
@@ -275,7 +275,7 @@ static void PauseAutoSwitchAfterManual() {
 static void checkPauseExpired() {
     if (_autoPauseUntil && !AutoSwitchPaused()) {
         _autoPauseUntil = 0;
-        vAutoSwitchByTyping = prefs::getInt(L"AutoSwitchByTyping", 1);
+        vAutoSwitchByTyping = prefs::getInt(L"AutoSwitchByTyping", 0);
         StartEnglishWord(false);
     }
 }
@@ -287,7 +287,7 @@ void reloadSettings() {
     vUseModernOrthography = prefs::getInt(L"ModernOrthography", 1);
     vTelexStyle = prefs::getInt(L"TelexStyle", 0);   // D56: Telex / Simple Telex 1 / 2
     vUseSmartSwitchKey = prefs::getInt(L"UseSmartSwitchKey", 1);
-    vAutoSwitchByTyping = AutoSwitchPaused() ? 0 : prefs::getInt(L"AutoSwitchByTyping", 1);
+    vAutoSwitchByTyping = AutoSwitchPaused() ? 0 : prefs::getInt(L"AutoSwitchByTyping", 0);
     vTypingLogKeys = prefs::getInt(L"TypingLogKeys", 1);
     vTypingLogEnabled = 0;   // fork: the typing log records keystrokes to disk; never on
     int hotkey = prefs::getInt(L"SwitchKeyStatus", 0);
@@ -375,7 +375,7 @@ void setLanguageByUser(int lang) {
     vLanguage = lang; TLManual("menu", vLanguage); VKLanguageChanged(true); startNewSession();
 }
 void setLanguageQuiet(int lang) {
-    _autoFixUndo.active = false; ResetEnglishWord(true); _autoPauseUntil = 0; vAutoSwitchByTyping = prefs::getInt(L"AutoSwitchByTyping", 1);
+    _autoFixUndo.active = false; ResetEnglishWord(true); _autoPauseUntil = 0; vAutoSwitchByTyping = prefs::getInt(L"AutoSwitchByTyping", 0);
     vLanguage = lang ? 1 : 0; VKLanguageChanged(false); startNewSession();
 }
 int language() { return vLanguage; }
@@ -760,7 +760,8 @@ static unsigned TrFlags() {
     return (GetKeyState(VK_CAPITAL) & 1 ? F_CAPS : 0) | (GetAsyncKeyState(VK_SHIFT) < 0 ? F_SHIFT : 0) | (GetAsyncKeyState(VK_CONTROL) < 0 ? F_CONTROL : 0) |
            (GetAsyncKeyState(VK_MENU) < 0 ? F_ALT : 0) | (GetAsyncKeyState(VK_LWIN) < 0 || GetAsyncKeyState(VK_RWIN) < 0 ? F_WIN : 0);
 }
-static bool TrModifiersDown() { return (TrFlags() & (F_SHIFT | F_CONTROL | F_ALT | F_WIN)) != 0; }
+/// Ctrl, Alt or Win held: our characters would be shortcuts. Shift doesn't matter to typed Unicode characters.
+static bool TrModifiersDown() { return (TrFlags() & (F_CONTROL | F_ALT | F_WIN)) != 0; }
 static bool TrHotkeyIs(int hk, Uint16 key, unsigned f) {
     if (!hk || key == KEY_EMPTY || GET_SWITCH_KEY(hk) != key) return false;
     return HAS_CONTROL(hk) == GET_BOOL(f & F_CONTROL) && HAS_OPTION(hk) == GET_BOOL(f & F_ALT) &&
@@ -787,10 +788,10 @@ static HWND TrFocusNow() {
 // be Alt+letter shortcuts in the app.
 static std::function<void()> _trWaiting; static UINT_PTR _trTimer = 0; static int _trWaitTicks = 0;
 static void CALLBACK TrWaitTimer(HWND, UINT, UINT_PTR, DWORD) {
-    if (TrModifiersDown() && ++_trWaitTicks < 330) return;   // up to 10 s
+    if (TrModifiersDown() && ++_trWaitTicks < 100) return;   // up to 3 s
     KillTimer(nullptr, _trTimer); _trTimer = 0;
     auto f = _trWaiting; _trWaiting = nullptr;
-    if (_trWaitTicks >= 330) { TrForget(); return; }
+    if (_trWaitTicks >= 100) { TrForget(); return; }
     if (f) f();
 }
 static void TrWhenKeysUp(std::function<void()> f) {
@@ -859,7 +860,7 @@ static void TrPressed() {
     if (!blank && !tr::incomplete) { tr::source = tr::buf; tr::wholeField = false; TrSend(); return; }
     // nothing typed since the cursor moved, or typing buf couldn't follow: translate the whole field, read through UI
     // Automation (not the clipboard, whose history would keep it)
-    tr::state = tr::Reading; unsigned id = ++tr::reqId; HWND o = tr::owner;
+    tr::state = tr::Reading; tr::pendingSince = GetTickCount64(); unsigned id = ++tr::reqId; HWND o = tr::owner;
     std::thread([id, o] {
         std::wstring t; int rc = site::readFocusedField(t);
         { std::lock_guard<std::mutex> g(tr::fieldMutex); TrWipe(tr::field); tr::field = t; tr::fieldRc = rc; tr::fieldId = id; }
@@ -988,7 +989,9 @@ void onTranslateMessage(UINT msg, WPARAM wp) {
 }
 void translateTick() {
     ULONGLONG now = GetTickCount64();
-    if (tr::state == tr::Pending && now - tr::pendingSince > 15000) { TrForget(); TrNotify(1, L"Máy chủ dịch không trả lời: đã huỷ"); }
+    // keys are swallowed while waiting: never for long, whatever got stuck (the server, or an app not answering UI Automation)
+    if (tr::state == tr::Pending && now - tr::pendingSince > 12000) { TrForget(); TrNotify(1, L"Máy chủ dịch không trả lời: đã huỷ"); }
+    if (tr::state == tr::Reading && now - tr::pendingSince > 4000) { TrForget(); TrNotify(1, L"Không đọc được ô chat: đã huỷ"); }
     int minutes = prefs::getInt(L"TranslateAutoOffMinutes", 10);
     if (tr::enabled && minutes > 0 && !translateBusy() && now - tr::lastUse > (ULONGLONG)minutes * 60000) {
         setTranslateEnabled(false);

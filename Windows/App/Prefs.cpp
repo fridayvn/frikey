@@ -138,6 +138,8 @@ static void fromVikeyDich() {
 
 void migrateFromOpenKey() {
     fromVikeyDich();
+    // FriKey 0.2.5: auto-switch guessing English words off, as Unikey types; it can be turned back on in Cài đặt
+    if (!has(L"FriKeyAutoSwitchOff")) { setInt(L"FriKeyAutoSwitchOff", 1); setInt(L"AutoSwitchByTyping", 0); }
     telexStyleFromOpenKey();
     if (has(L"MigratedFromOpenKey")) return;
     setInt(L"MigratedFromOpenKey", 1);
